@@ -11,15 +11,12 @@ import {
   Progress,
   Badge,
   Tag,
-  Modal,
   Tooltip,
   Popconfirm,
   Descriptions,
-  Spin,
-  Collapse,
-  Empty,
   Divider,
-  Alert,
+  Collapse,
+  Spin,
 } from 'antd';
 import { 
   InboxOutlined, DeleteOutlined, EyeOutlined, 
@@ -27,7 +24,7 @@ import {
   CheckCircleOutlined, ExclamationCircleOutlined, ClockCircleOutlined,
   ExperimentOutlined
 } from '@ant-design/icons';
-import { API_BASE_URL, deleteDocument, getUploadedDocuments, extractMetadata, saveMetadata } from '../services/api';
+import { API_BASE_URL, deleteDocument, getUploadedDocuments, extractMetadata, saveMetadata, getDocumentDetail } from '../services/api';
 import MetadataEditModal from '../components/MetadataEditModal';
 import type { ContractMetadata } from '../types';
 import type { ColumnsType } from 'antd/es/table';
@@ -38,13 +35,14 @@ const { Title, Text, Paragraph } = Typography;
 const { Dragger } = Upload;
 const { Panel } = Collapse;
 
+
 interface DocumentRecord {
   contractKey: string;
   name: string;
   fileName?: string;
   uploadTime: string;
   parseStatus: 'success' | 'processing' | 'failed' | 'pending';
-  dataType: 'structured' | 'legacy';
+  metadataExtracted: boolean;
   pageCount: number;
   fileSize?: string;
   hasStructuredData: boolean;
@@ -121,6 +119,8 @@ interface DocumentDetail {
   totalPages?: number;
   totalChars?: number;
   extractionStatus?: string;
+  uploadTime?: string;
+  fileSize?: string;
   structuredData?: {
     signing_date?: string;
     party_a?: string;
@@ -148,14 +148,15 @@ const UploadPage: FC = () => {
   const [uploading, setUploading] = useState(false);
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
   const [loading, setLoading] = useState(false);
-  const [detailVisible, setDetailVisible] = useState(false);
-  const [activeContract, setActiveContract] = useState<string | null>(null);
-  const [currentDetail, setCurrentDetail] = useState<DocumentDetail | null>(null);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [detailError, setDetailError] = useState<string | null>(null);
   const [metadataModalVisible, setMetadataModalVisible] = useState(false);
   const [extractingMetadata, setExtractingMetadata] = useState<string | null>(null);
   const [currentMetadata, setCurrentMetadata] = useState<ContractMetadata | null>(null);
+
+  // 详情视图相关状态
+  const [selectedContractKey, setSelectedContractKey] = useState<string | null>(null);
+  const [detailLoading, setDetailLoading] = useState<boolean>(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const [detailData, setDetailData] = useState<DocumentDetail | null>(null);
 
   // 获取文档列表
   const fetchDocuments = async () => {
@@ -191,8 +192,7 @@ const UploadPage: FC = () => {
             parseStatus = 'pending';
           }
 
-          const rawDataType = pickString(doc, ['dataType', 'data_type']) || 'legacy';
-          const dataType: DocumentRecord['dataType'] = rawDataType === 'structured' ? 'structured' : 'legacy';
+          const metadataExtracted = pickBoolean(doc, ['has_metadata', 'metadataExtracted', 'metadata_extracted'], false);
 
           const pageCount = pickNumber(doc, ['pageCount', 'page_count', 'chunks_count', 'pages']) ?? 0;
           const fileSize = pickString(doc, ['fileSize', 'file_size']);
@@ -206,7 +206,7 @@ const UploadPage: FC = () => {
             fileName,
             uploadTime,
             parseStatus,
-            dataType,
+            metadataExtracted,
             pageCount,
             fileSize,
             hasStructuredData,
@@ -224,67 +224,25 @@ const UploadPage: FC = () => {
     }
   };
 
-  const fetchDocumentDetail = async (documentName: string): Promise<DocumentDetail> => {
-    const response = await fetch(`${API_BASE_URL}/documents/${encodeURIComponent(documentName)}/detail`);
-    if (!response.ok) {
-      throw new Error('获取文档详情失败');
-    }
-    const result: DocumentDetailResponse = await response.json();
-    if (result.code === 200 && result.data) {
-      return result.data;
-    }
-    throw new Error(result.message || '获取文档详情失败');
-  };
-
-  const handleCloseDetail = () => {
-    setDetailVisible(false);
-    setActiveContract(null);
-    setCurrentDetail(null);
+  const showDetail = async (record: DocumentRecord) => {
+    setSelectedContractKey(record.contractKey);
+    setDetailLoading(true);
     setDetailError(null);
-    setDetailLoading(false);
-  };
-
-  const showDetail = (record: DocumentRecord) => {
-    setActiveContract(record.contractKey);
-    setDetailVisible(true);
-  };
-
-  useEffect(() => {
-    if (!detailVisible || !activeContract) {
-      return;
-    }
-
-    let cancelled = false;
-
-    const loadDetail = async () => {
-      setDetailLoading(true);
-      setDetailError(null);
-      setCurrentDetail(null);
-
-      try {
-        const detail = await fetchDocumentDetail(activeContract);
-        if (!cancelled) {
-          setCurrentDetail(detail);
-        }
-      } catch (error) {
-        if (!cancelled) {
-          console.error('获取文档详情失败:', error);
-          setDetailError(error instanceof Error ? error.message : '获取文档详情失败');
-          message.error('获取文档详情失败');
-        }
-      } finally {
-        if (!cancelled) {
-          setDetailLoading(false);
-        }
+    setDetailData(null);
+    try {
+      const resp: DocumentDetailResponse | any = await getDocumentDetail(record.contractKey);
+      const detail: DocumentDetail | null = (resp && typeof resp === 'object') ? (resp.data ?? resp) : null;
+      if (!detail) {
+        throw new Error('未获取到文档详情');
       }
-    };
-
-    loadDetail();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [detailVisible, activeContract]);
+      setDetailData(detail);
+    } catch (err: any) {
+      console.error('获取文档详情失败:', err);
+      setDetailError(err.message || '获取文档详情失败');
+    } finally {
+      setDetailLoading(false);
+    }
+  };
 
   // 删除文档
   const handleDelete = async (documentName: string) => {
@@ -314,6 +272,10 @@ const UploadPage: FC = () => {
         };
         setCurrentMetadata(metadata);
         setMetadataModalVisible(true);
+        
+        // 刷新文档列表以获取最新的提取状态
+        await fetchDocuments();
+        
         message.success('元数据提取成功');
       } else {
         throw new Error(response.message || '元数据提取失败');
@@ -332,13 +294,14 @@ const UploadPage: FC = () => {
     setCurrentMetadata(null);
   };
 
-  // 保存元数据
+  // 保存元数据（修复：不再使用未定义的 activeContract）
   const handleSaveMetadata = async (metadata: ContractMetadata) => {
     try {
-      // 获取当前文档的文件名
-      const filename = metadata.contract_name || `${activeContract}.pdf`;
-      
-      // 调用后端API保存元数据
+      const filename = metadata.contract_name;
+      if (!filename) {
+        message.error('缺少合同文件名，无法保存元数据');
+        return;
+      }
       await saveMetadata(filename, metadata);
       
       message.success('元数据保存成功');
@@ -404,16 +367,13 @@ const UploadPage: FC = () => {
     );
   };
 
-  // 数据类型标签
-  const renderDataType = (dataType: string) => {
-    switch(dataType) {
-      case 'structured':
-        return <Tag color="blue">结构化</Tag>;
-      case 'legacy':
-        return <Tag color="orange">旧格式</Tag>;
-      default:
-        return <Tag color="gray">未知</Tag>;
-    }
+  // 元数据提取状态标签
+  const renderMetadataStatus = (extracted: boolean) => {
+    return extracted ? (
+      <Tag color="green" icon={<CheckCircleOutlined />}>已提取</Tag>
+    ) : (
+      <Tag color="orange" icon={<ClockCircleOutlined />}>未提取</Tag>
+    );
   };
 
   // 表格列定义
@@ -445,11 +405,11 @@ const UploadPage: FC = () => {
       render: renderStatus,
     },
     {
-      title: '数据类型',
-      dataIndex: 'dataType',
-      key: 'dataType',
-      width: '10%',
-      render: renderDataType,
+      title: '元数据提取状态',
+      dataIndex: 'metadataExtracted',
+      key: 'metadataExtracted',
+      width: '12%',
+      render: renderMetadataStatus,
     },
     {
       title: '页数',
@@ -471,22 +431,24 @@ const UploadPage: FC = () => {
       width: '10%',
       render: (_, record) => (
         <Space size="small">
-          <Tooltip title="查看详情" mouseEnterDelay={0.5} mouseLeaveDelay={0.1} destroyTooltipOnHide trigger={["hover"]} getPopupContainer={() => document.body}>
+          <Tooltip title="查看详情" mouseEnterDelay={0.5} mouseLeaveDelay={0.1} destroyOnHidden trigger={["hover"]} getPopupContainer={() => document.body}>
             <Button 
               type="text" 
               icon={<EyeOutlined />} 
               onClick={() => showDetail(record)}
             />
           </Tooltip>
-          <Tooltip title="提取元数据" mouseEnterDelay={0.5} mouseLeaveDelay={0.1} destroyTooltipOnHide trigger={["hover"]} getPopupContainer={() => document.body}>
-            <Button 
-              type="text" 
-              icon={<ExperimentOutlined />} 
-              loading={extractingMetadata === record.contractKey}
-              onClick={() => handleExtractMetadata(record.contractKey)}
-            />
-          </Tooltip>
-          <Tooltip title="下载文档" mouseEnterDelay={0.5} mouseLeaveDelay={0.1} destroyTooltipOnHide trigger={["hover"]} getPopupContainer={() => document.body}>
+          {!record.metadataExtracted && (
+            <Tooltip title="提取元数据" mouseEnterDelay={0.5} mouseLeaveDelay={0.1} destroyOnHidden trigger={["hover"]} getPopupContainer={() => document.body}>
+              <Button 
+                type="text" 
+                icon={<ExperimentOutlined />} 
+                loading={extractingMetadata === record.contractKey}
+                onClick={() => handleExtractMetadata(record.contractKey)}
+              />
+            </Tooltip>
+          )}
+          <Tooltip title="下载文档" mouseEnterDelay={0.5} mouseLeaveDelay={0.1} destroyOnHidden trigger={["hover"]} getPopupContainer={() => document.body}>
             <Button 
               type="text" 
               icon={<DownloadOutlined />} 
@@ -518,6 +480,69 @@ const UploadPage: FC = () => {
 
   return (
     <div style={{ padding: '24px' }}>
+      {/* 详情展示区域：顶部显示合同名称，中部按顺序展示 */}
+      {selectedContractKey && (
+        <Card style={{ marginBottom: 24 }}>
+          {detailLoading ? (
+            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 120 }}>
+              <Spin tip="加载合同详情中..." />
+            </div>
+          ) : detailError ? (
+            <Text type="danger">{detailError}</Text>
+          ) : detailData ? (
+            <div>
+              {/* 页面顶部：完整显示合同名称 */}
+              <Title level={3} style={{ marginTop: 0, marginBottom: 12 }}>
+                {detailData.contract_name}
+              </Title>
+
+              {/* 中部 1：合同所有元数据信息 */}
+              <Divider orientation="left">合同元数据信息</Divider>
+              {detailData.structuredData ? (
+                <Descriptions bordered size="small" column={2}>
+                  <Descriptions.Item label="签订日期">{detailData.structuredData.signing_date || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="甲方">{detailData.structuredData.party_a || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="乙方">{detailData.structuredData.party_b || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="客户类型">{detailData.structuredData.customer_type || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="合同金额" span={2}>{detailData.structuredData.contract_amount ?? '-'}</Descriptions.Item>
+                  <Descriptions.Item label="人员名单" span={2}>{detailData.structuredData.personnel_list || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="岗位信息" span={2}>{detailData.structuredData.positions || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="内容摘要" span={2}>
+                    <Paragraph style={{ marginBottom: 0 }}>{detailData.structuredData.contract_content_summary || '-'}</Paragraph>
+                  </Descriptions.Item>
+                </Descriptions>
+              ) : (
+                <Text type="secondary">暂无已保存的元数据信息</Text>
+              )}
+
+              {/* 中部 2：合同总页数、上传时间 */}
+              <Divider orientation="left">文档信息</Divider>
+              <Descriptions size="small" column={3}>
+                <Descriptions.Item label="总页数">{detailData.totalPages ?? '-'}</Descriptions.Item>
+                <Descriptions.Item label="上传时间">{detailData.uploadTime ?? '-'}</Descriptions.Item>
+                <Descriptions.Item label="文件大小">{detailData.fileSize ?? '-'}</Descriptions.Item>
+              </Descriptions>
+
+              {/* 中部 3：OCR 文档块文本内容（按页）*/}
+              <Divider orientation="left">OCR 文本（按页）</Divider>
+              {Array.isArray(detailData.pages) && detailData.pages.length > 0 ? (
+                <Collapse accordion>
+                  {detailData.pages.map((p, idx) => (
+                    <Panel header={`第 ${p.pageId ?? idx + 1} 页`} key={String(p.pageId ?? idx)}>
+                      <Paragraph style={{ whiteSpace: 'pre-wrap', fontFamily: 'monospace', background: '#fafafa', padding: 12, borderRadius: 6, border: '1px solid #f0f0f0' }}>
+                        {p.text || '（无文本）'}
+                      </Paragraph>
+                    </Panel>
+                  ))}
+                </Collapse>
+              ) : (
+                <Text type="secondary">暂无OCR文本内容</Text>
+              )}
+            </div>
+          ) : null}
+        </Card>
+      )}
+
       {/* 上传区域 */}
       <Card style={{ marginBottom: '24px' }}>
         <Title level={4}>📁 上传合同文档</Title>
@@ -559,158 +584,63 @@ const UploadPage: FC = () => {
             showQuickJumper: true,
             showTotal: (total) => `共 ${total} 个文档`,
           }}
+          expandable={{
+            expandedRowRender: (record) => (
+              <div style={{ padding: '12px 16px' }}>
+                <Space size="middle" wrap>
+                  <Tooltip title="查看详情" mouseEnterDelay={0.5} mouseLeaveDelay={0.1} destroyOnHidden trigger={["hover"]} getPopupContainer={() => document.body}>
+                    <Button type="default" icon={<EyeOutlined />} onClick={() => showDetail(record)}>
+                      查看详情
+                    </Button>
+                  </Tooltip>
+                  {!record.metadataExtracted && (
+                    <Tooltip title="提取元数据" mouseEnterDelay={0.5} mouseLeaveDelay={0.1} destroyOnHidden trigger={["hover"]} getPopupContainer={() => document.body}>
+                      <Button type="primary" icon={<ExperimentOutlined />} loading={extractingMetadata === record.contractKey} onClick={() => handleExtractMetadata(record.contractKey)}>
+                        提取元数据
+                      </Button>
+                    </Tooltip>
+                  )}
+                  <Tooltip title="下载文档" mouseEnterDelay={0.5} mouseLeaveDelay={0.1} destroyOnHidden trigger={["hover"]} getPopupContainer={() => document.body}>
+                    <Button icon={<DownloadOutlined />} onClick={() => message.info('下载功能开发中')}>
+                      下载
+                    </Button>
+                  </Tooltip>
+                  <Popconfirm
+                    title="确定删除此文档吗？"
+                    onConfirm={() => handleDelete(record.contractKey)}
+                    okText="确定"
+                    cancelText="取消"
+                  >
+                    <Button danger icon={<DeleteOutlined />}>删除</Button>
+                  </Popconfirm>
+                </Space>
+              </div>
+            ),
+          }}
         />
       </Card>
-
-      {/* 详情弹窗 */}
-      <Modal
-        title={
-          <Space>
-            <FileTextOutlined />
-            合同详细信息
-          </Space>
-        }
-        open={detailVisible}
-        onCancel={handleCloseDetail}
-        width={900}
-        destroyOnHidden
-        maskClosable={false}
-        styles={{ body: { maxHeight: '70vh', overflowY: 'auto' } }}
-        footer={[
-          <Button key="close" onClick={handleCloseDetail}>
-            关闭
-          </Button>,
-          <Button
-            key="download"
-            type="primary"
-            icon={<DownloadOutlined />}
-            disabled={!currentDetail}
-            onClick={() => {
-              if (currentDetail) {
-                message.info(`下载功能开发中: ${currentDetail.contract_name}`);
-              }
-            }}
-          >
-            下载原文
-          </Button>,
-        ]}
-      >
-        {detailLoading ? (
-          <div style={{ textAlign: 'center', padding: '40px 0' }}>
-            <Spin size="large" />
-            <div style={{ marginTop: '16px' }}>加载详情中...</div>
-          </div>
-        ) : detailError ? (
-          <Alert type="error" message="加载详情失败" description={detailError} showIcon />
-        ) : currentDetail ? (
-          <Space direction="vertical" size={16} style={{ width: '100%' }}>
-            <Card bordered={false} style={{ background: '#f8f9ff' }}>
-              <Space direction="vertical" size={12} style={{ width: '100%' }}>
-                <Space align="center" size={12} wrap>
-                  <FileTextOutlined style={{ fontSize: 20, color: '#667eea' }} />
-                  <Title level={4} style={{ margin: 0 }}>
-                    {currentDetail.contract_name}
-                  </Title>
-                  {currentDetail.dataType ? renderDataType(currentDetail.dataType) : null}
-                  {currentDetail.extractionStatus && (
-                    <Tag color={currentDetail.extractionStatus === '已提取' ? 'success' : 'warning'}>
-                      {currentDetail.extractionStatus}
-                    </Tag>
-                  )}
-                </Space>
-                <Divider style={{ margin: '12px 0' }} />
-                <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
-                  <div>
-                    <Text type="secondary">总页数</Text>
-                    <div style={{ fontSize: 18, fontWeight: 600 }}>
-                      {currentDetail.totalPages ?? 0}
-                    </div>
-                  </div>
-                  <div>
-                    <Text type="secondary">总字符数</Text>
-                    <div style={{ fontSize: 18, fontWeight: 600 }}>
-                      {(currentDetail.totalChars ?? 0).toLocaleString()}
-                    </div>
-                  </div>
-                  <div>
-                    <Text type="secondary">客户类型</Text>
-                    <div style={{ fontSize: 18, fontWeight: 600 }}>
-                      {currentDetail.structuredData?.customer_type || '未分类'}
-                    </div>
-                  </div>
-                </div>
-              </Space>
-            </Card>
-
-            <Card title="基本信息" bordered={false}>
-              <Descriptions bordered column={2} size="small">
-                <Descriptions.Item label="数据类型">
-                  {currentDetail.dataType ? renderDataType(currentDetail.dataType) : <Tag color="gray">未知</Tag>}
-                </Descriptions.Item>
-                <Descriptions.Item label="客户类型">
-                  <Tag color="blue">{currentDetail.structuredData?.customer_type || '未分类'}</Tag>
-                </Descriptions.Item>
-                <Descriptions.Item label="签订日期">
-                  {currentDetail.structuredData?.signing_date || '未提取'}
-                </Descriptions.Item>
-                <Descriptions.Item label="合同金额">
-                  {currentDetail.structuredData?.contract_amount !== undefined
-                    ? `¥${currentDetail.structuredData.contract_amount.toLocaleString()}`
-                    : '未提取'}
-                </Descriptions.Item>
-                <Descriptions.Item label="甲方">
-                  {currentDetail.structuredData?.party_a || '未提取'}
-                </Descriptions.Item>
-                <Descriptions.Item label="乙方">
-                  {currentDetail.structuredData?.party_b || '未提取'}
-                </Descriptions.Item>
-                <Descriptions.Item label="关键岗位" span={2}>
-                  {currentDetail.structuredData?.positions || '未提取'}
-                </Descriptions.Item>
-                <Descriptions.Item label="人员清单" span={2}>
-                  {currentDetail.structuredData?.personnel_list || '未提取'}
-                </Descriptions.Item>
-              </Descriptions>
-            </Card>
-
-            <Card title="合同摘要" bordered={false}>
-              <Paragraph style={{ marginBottom: 0 }}>
-                {currentDetail.structuredData?.contract_content_summary || '暂无摘要'}
-              </Paragraph>
-            </Card>
-
-            <Card title="页面内容" bordered={false}>
-              {currentDetail.pages && currentDetail.pages.length > 0 ? (
-                <Collapse accordion>
-                  {currentDetail.pages.map((page, index) => (
-                    <Panel
-                      key={`page-${page.pageId ?? index}`}
-                      header={`第 ${page.pageId ?? index + 1} 页`}
-                    >
-                      <Paragraph style={{ whiteSpace: 'pre-wrap' }}>
-                        {page.text || '无内容'}
-                      </Paragraph>
-                      <Text type="secondary">
-                        字符数: {(page.text ?? '').length}
-                      </Text>
-                    </Panel>
-                  ))}
-                </Collapse>
-              ) : (
-                <Empty description="暂无页面内容" />
-              )}
-            </Card>
-          </Space>
-        ) : (
-          <Empty description="暂无合同详情" />
-        )}      </Modal>
 
       {/* 元数据编辑弹窗 */}
       <MetadataEditModal
         visible={metadataModalVisible}
-        initialMetadata={currentMetadata}
-        filename={currentMetadata?.contract_name || ''}
         onCancel={handleCloseMetadataModal}
+        filename={currentMetadata?.contract_name || ''}
+        initialMetadata={currentMetadata}
+        loading={extractingMetadata !== null}
+        // 保存后：立即刷新当前行状态 + 重新拉取列表（以保证和后端完全一致）
+        onSaved={(metadata) => {
+          // 本地即时更新：将对应行的 metadataExtracted 标记为 true
+          setDocuments((prev) => prev.map((doc) => {
+            if (doc.fileName === metadata.contract_name || `${doc.contractKey}.pdf` === metadata.contract_name) {
+              return { ...doc, metadataExtracted: true };
+            }
+            return doc;
+          }));
+          // 关闭弹窗
+          handleCloseMetadataModal();
+          // 再次拉取列表，确保状态与后端一致
+          fetchDocuments();
+        }}
       />
     </div>
   );

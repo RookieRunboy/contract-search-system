@@ -12,6 +12,8 @@ interface MetadataEditModalProps {
   filename: string;
   initialMetadata: ContractMetadata | null;
   loading?: boolean;
+  // 新增：保存成功回调
+  onSaved?: (metadata: ContractMetadata) => void;
 }
 
 const MetadataEditModal: React.FC<MetadataEditModalProps> = ({
@@ -19,7 +21,8 @@ const MetadataEditModal: React.FC<MetadataEditModalProps> = ({
   onCancel,
   filename,
   initialMetadata,
-  loading = false
+  loading = false,
+  onSaved,
 }) => {
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
@@ -34,13 +37,15 @@ const MetadataEditModal: React.FC<MetadataEditModalProps> = ({
     try {
       const values = await form.validateFields();
       setSaving(true);
-      
+
       const metadata: ContractMetadata = {
         ...values,
       };
-      
+
       await saveMetadata(filename, metadata);
       message.success('元数据保存成功！');
+      // 调用父组件回调以便刷新列表
+      onSaved?.(metadata);
       onCancel();
     } catch (error: any) {
       console.error('保存元数据失败:', error);
@@ -89,12 +94,12 @@ const MetadataEditModal: React.FC<MetadataEditModalProps> = ({
         >
           <div className="grid grid-cols-2 gap-4">
             <Form.Item label="合同名称" name="contract_name">
-          <Input disabled placeholder="合同名称（自动使用文件名）" />
-        </Form.Item>
-        
-        <Form.Item label="甲方" name="party_a">
-          <Input placeholder="请输入甲方名称" />
-        </Form.Item>
+              <Input disabled placeholder="合同名称（自动使用文件名）" />
+            </Form.Item>
+
+            <Form.Item label="甲方" name="party_a">
+              <Input placeholder="请输入甲方名称" />
+            </Form.Item>
 
             <Form.Item label="乙方" name="party_b">
               <Input placeholder="请输入乙方名称" />

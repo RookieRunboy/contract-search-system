@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>测试搜索结果</title>
+    <script>
+        async function testSearch() {
+            try {
+                const response = await fetch('http://localhost:8006/document/search?query=银华基金&top_k=3');
+                const result = await response.json();
+                
+                console.log('API返回结果:', result);
+                
+                const output = document.getElementById('output');
+                output.innerHTML = '<pre>' + JSON.stringify(result, null, 2) + '</pre>';
+                
+                // 显示结构化信息
+                const info = document.getElementById('info');
+                if (result.data && Array.isArray(result.data)) {
+                    info.innerHTML = `
+                        <h3>搜索结果分析:</h3>
+                        <p>返回合同数量: ${result.data.length}</p>
+                        ${result.data.map((contract, i) => `
+                            <div style="border: 1px solid #ccc; margin: 10px; padding: 10px;">
+                                <h4>合同 ${i+1}: ${contract.contract_name}</h4>
+                                <p>总分: ${contract.score}</p>
+                                <p>文档块数量: ${contract.chunks ? contract.chunks.length : 0}</p>
+                                ${contract.chunks ? contract.chunks.slice(0, 2).map((chunk, j) => `
+                                    <div style="margin-left: 20px; border-left: 2px solid #eee; padding-left: 10px;">
+                                        <strong>块 ${j+1}:</strong> 页面${chunk.page_id}, 分数${chunk.score}<br>
+                                        <em>${chunk.text.substring(0, 100)}...</em>
+                                    </div>
+                                `).join('') : ''}
+                            </div>
+                        `).join('')}
+                    `;
+                }
+            } catch (error) {
+                console.error('测试失败:', error);
+                document.getElementById('output').innerHTML = '错误: ' + error.message;
+            }
+        }
+    </script>
+</head>
+<body>
+    <h1>合同搜索结果测试</h1>
+    <button onclick="testSearch()">测试搜索API</button>
+    <div id="info"></div>
+    <div id="output"></div>
+</body>
+</html>

@@ -1,0 +1,49 @@
+{
+  "name": "contract-retrieval-cli",
+  "version": "1.0.0",
+  "base_url_default": "http://172.16.5.31:8006",
+  "actions": {
+    "check": {
+      "description": "检查后端与 Elasticsearch 状态",
+      "method": "GET",
+      "endpoint": "/system/elasticsearch",
+      "params": []
+    },
+    "upload": {
+      "description": "上传一个或多个 PDF 文件并入库（解析+向量化）",
+      "method": "POST",
+      "endpoint": "/document/add",
+      "params": [
+        {"name": "file", "type": "file", "multiple": true, "required": true}
+      ]
+    },
+    "search": {
+      "description": "文档检索（混合：向量+关键词）",
+      "method": "GET",
+      "endpoint": "/document/search",
+      "params": [
+        {"name": "query", "type": "string", "required": true},
+        {"name": "top_k", "type": "integer", "required": false, "default": 3}
+      ]
+    },
+    "delete": {
+      "description": "删除文档（兼容 stem、带扩展名或完整路径）",
+      "method": "DELETE",
+      "endpoint": "/document/delete",
+      "params": [
+        {"name": "filename", "type": "string", "multiple": true, "required": true, "note": "可传 'example'、'example.pdf' 或 '/path/example.pdf'，后端会自动归一化为 contractName"}
+      ]
+    }
+  },
+  "global_options": [
+    {"name": "url", "type": "string", "default": "http://172.16.5.31:8006", "alias": ["-u"], "description": "后端基础地址"}
+  ],
+  "examples": [
+    "python test_api_local.py --check",
+    "python test_api_local.py -u http://localhost:8006 --check",
+    "python test_api_local.py -u http://localhost:8006 -U ./a.pdf ./b.pdf",
+    "python test_api_local.py -u http://localhost:8006 -q '付款条款' --top-k 5",
+    "python test_api_local.py -u http://localhost:8006 -d a a.pdf ./案例合同/a.pdf",
+    "python test_api_local.py -u http://localhost:8006 --check -U ./a.pdf ./b.pdf -q '付款条款' --top-k 10 -d a b"
+  ]
+}

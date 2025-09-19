@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { ContractSearchResult, DocumentChunk } from '../types';
+import type { ContractSearchResult, DocumentChunk, MetadataExtractionResponse, ContractMetadata } from '../types/index';
 
 export const API_BASE_URL = import.meta.env.DEV ? '/api' : '';
 
@@ -222,5 +222,31 @@ export const downloadDocument = async (documentName: string): Promise<Blob> => {
     throw new Error(error.response?.data?.detail || error.message || '文件下载失败');
   }
 };
+
+// 提取文档元数据
+export const extractMetadata = async (filename: string): Promise<MetadataExtractionResponse> => {
+  try {
+    const response = await axios.post(`${API_BASE_URL}/document/extract-metadata`, null, {
+      params: { filename },
+      timeout: 120000 // 2分钟超时，因为LLM调用可能较慢
+    });
+    return response.data;
+  } catch (error: any) {
+    console.error('提取元数据API调用失败:', error);
+    throw new Error(error.response?.data?.detail || error.message || '提取元数据失败');
+  }
+};
+
+// 保存文档元数据
+export const saveMetadata = async (filename: string, metadata: ContractMetadata) => {
+  const response = await axios.post(`${API_BASE_URL}/document/save-metadata`, {
+    filename,
+    metadata
+  });
+  return response.data;
+};
+
+// 别名函数，保持向后兼容
+export const getDocumentList = getUploadedDocuments;
 
 export default api;

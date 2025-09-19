@@ -24,9 +24,12 @@ import {
 import { 
   InboxOutlined, DeleteOutlined, EyeOutlined, 
   DownloadOutlined, ReloadOutlined, FileTextOutlined, 
-  CheckCircleOutlined, ExclamationCircleOutlined, ClockCircleOutlined 
+  CheckCircleOutlined, ExclamationCircleOutlined, ClockCircleOutlined,
+  ExperimentOutlined
 } from '@ant-design/icons';
-import { API_BASE_URL, deleteDocument, getUploadedDocuments } from '../services/api';
+import { API_BASE_URL, deleteDocument, getUploadedDocuments, extractMetadata } from '../services/api';
+import MetadataEditModal from '../components/MetadataEditModal';
+import type { ContractMetadata } from '../types';
 import type { ColumnsType } from 'antd/es/table';
 import type { UploadChangeParam } from 'antd/es/upload';
 import type { UploadFile } from 'antd/es/upload/interface';
@@ -150,6 +153,9 @@ const UploadPage: FC = () => {
   const [currentDetail, setCurrentDetail] = useState<DocumentDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
+  const [metadataModalVisible, setMetadataModalVisible] = useState(false);
+  const [extractingMetadata, setExtractingMetadata] = useState<string | null>(null);
+  const [currentMetadata, setCurrentMetadata] = useState<ContractMetadata | null>(null);
 
   // 获取文档列表
   const fetchDocuments = async () => {
@@ -292,6 +298,48 @@ const UploadPage: FC = () => {
     }
   };
 
+  // 提取元数据
+  const handleExtractMetadata = async (contractKey: string) => {
+    setExtractingMetadata(contractKey);
+    try {
+      const fileName = `${contractKey}.pdf`;
+      const response = await extractMetadata(fileName);
+      
+      // 检查API响应结构
+      if (response.code === 200 && response.data?.metadata) {
+        // 确保合同名称使用文件名
+        const metadata = {
+          ...response.data.metadata,
+          contract_name: fileName
+        };
+        setCurrentMetadata(metadata);
+        setMetadataModalVisible(true);
+        message.success('元数据提取成功');
+      } else {
+        throw new Error(response.message || '元数据提取失败');
+      }
+    } catch (error) {
+      console.error('提取元数据失败:', error);
+      message.error(error instanceof Error ? error.message : '提取元数据失败');
+    } finally {
+      setExtractingMetadata(null);
+    }
+  };
+
+  // 关闭元数据弹窗
+  const handleCloseMetadataModal = () => {
+    setMetadataModalVisible(false);
+    setCurrentMetadata(null);
+  };
+
+  // 保存元数据
+  const handleSaveMetadata = (metadata: ContractMetadata) => {
+    console.log('保存元数据:', metadata);
+    message.success('元数据保存成功');
+    handleCloseMetadataModal();
+    // 这里可以添加保存到后端的逻辑
+  };
+
   // 上传配置
   const uploadProps = {
     name: 'file',
@@ -418,6 +466,14 @@ const UploadPage: FC = () => {
               onClick={() => showDetail(record)}
             />
           </Tooltip>
+          <Tooltip title="提取元数据" mouseEnterDelay={0.5} mouseLeaveDelay={0}>
+            <Button 
+              type="text" 
+              icon={<ExperimentOutlined />} 
+              loading={extractingMetadata === record.contractKey}
+              onClick={() => handleExtractMetadata(record.contractKey)}
+            />
+          </Tooltip>
           <Tooltip title="下载文档" mouseEnterDelay={0.5} mouseLeaveDelay={0}>
             <Button 
               type="text" 
@@ -505,9 +561,9 @@ const UploadPage: FC = () => {
         open={detailVisible}
         onCancel={handleCloseDetail}
         width={900}
-        destroyOnClose
+        destroyOnHidden
         maskClosable={false}
-        bodyStyle={{ maxHeight: '70vh', overflowY: 'auto' }}
+        styles={{ body: { maxHeight: '70vh', overflowY: 'auto' } }}
         footer={[
           <Button key="close" onClick={handleCloseDetail}>
             关闭
@@ -635,8 +691,15 @@ const UploadPage: FC = () => {
           </Space>
         ) : (
           <Empty description="暂无合同详情" />
-        )}
-      </Modal>
+        )}      </Modal>
+
+      {/* 元数据编辑弹窗 */}
+      <MetadataEditModal
+        visible={metadataModalVisible}
+        initialMetadata={currentMetadata}
+        filename={currentMetadata?.contract_name || ''}
+        onCancel={handleCloseMetadataModal}
+      />
     </div>
   );
 };

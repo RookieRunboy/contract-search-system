@@ -12,6 +12,8 @@ import os
 from pdfToElasticSearch import PdfToElasticsearch
 from elasticSearchDelete import ElasticsearchDocumentDeleter
 from elasticSearchSearch import ElasticsearchVectorSearch
+from elasticSearchOutput import get_document_by_filename
+from llm_metadata_extractor import MetadataExtractor
 from elasticsearch import exceptions as es_exceptions, helpers
 
 # FastAPI应用
@@ -41,6 +43,8 @@ app.add_middleware(
 pdf_to_es = PdfToElasticsearch()
 es_deleter = ElasticsearchDocumentDeleter()
 es_searcher = ElasticsearchVectorSearch()
+doc_getter = get_document_by_filename()
+metadata_extractor = MetadataExtractor()
 
 UPLOAD_DIR = Path(__file__).resolve().parent.parent / "uploaded_contracts"
 
@@ -61,9 +65,6 @@ def _format_file_size(size_in_bytes: int) -> str:
 
 @app.get("/")
 async def root():
-    if FRONTEND_INDEX_FILE.exists():
-        return FileResponse(FRONTEND_INDEX_FILE)
-
     return {
         "message": "contractsSearchAPI running",
         "version": "2.0.0",
@@ -78,6 +79,9 @@ async def root():
             "/upload",
             "/search",
             "/health",
+            "/document/extract-metadata",
+            "/document/save-metadata",
+            "/document/download/{document_name}"
         ],
     }
 
@@ -577,6 +581,115 @@ async def health_check():
         raise HTTPException(status_code=500, detail=f"服务异常: {str(e)}")
 
 
+@app.post("/document/extract-metadata")
+async def extract_metadata(filename: str = Query(..., description="要提取元数据的文件名")):
+    """
+    从文档中提取元数据
+    """
+    try:
+        # 从Elasticsearch获取文档原始文本
+        document_text = await run_in_threadpool(doc_getter.get_document_text, filename)
+        
+        if not document_text:
+            raise HTTPException(status_code=404, detail="文档不存在或无法获取文档内容")
+        
+        # 调用LLM进行元数据提取
+        extraction_result = await run_in_threadpool(
+            metadata_extractor.extract_metadata, 
+            document_text
+        )
+        
+        if extraction_result['success']:
+            # 确保元数据中包含合同名称（使用文件名）
+            metadata = extraction_result['metadata'].copy()
+            metadata['contract_name'] = filename
+            
+            return {
+                "code": 200,
+                "message": "元数据提取成功",
+                "data": {
+                    "filename": filename,
+                    "metadata": metadata,
+                    "document_length": len(document_text),
+                    "raw_response": extraction_result.get('raw_response')
+                }
+            }
+        else:
+            return {
+                "code": 500,
+                "message": f"元数据提取失败: {extraction_result['error']}",
+                "data": {
+                    "filename": filename,
+                    "error": extraction_result['error'],
+                    "document_length": len(document_text)
+                }
+            }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {
+            "code": 500,
+            "message": f"元数据提取失败: {str(e)}",
+            "data": None
+        }
+
+
+@app.post("/document/save-metadata")
+async def save_metadata(request: dict):
+    """
+    保存文档元数据到Elasticsearch
+    """
+    try:
+        filename = request.get('filename')
+        metadata = request.get('metadata')
+        
+        if not filename or not metadata:
+            raise HTTPException(status_code=400, detail="缺少必要参数：filename 或 metadata")
+        
+        # 更新Elasticsearch中的文档元数据
+        # 这里需要实现将元数据保存到ES的逻辑
+        # 可以创建一个新的索引专门存储元数据，或者更新现有文档的metadata字段
+        
+        # 构建元数据文档
+        metadata_doc = {
+            "filename": filename,
+            "metadata": metadata,
+            "updated_at": datetime.now().isoformat(),
+            "doc_type": "metadata"
+        }
+        
+        # 使用filename作为文档ID，这样可以覆盖更新
+        metadata_index = "contract_metadata"
+        doc_id = filename.replace('.', '_')  # ES文档ID不能包含点
+        
+        # 保存到Elasticsearch
+        es_searcher.es.index(
+            index=metadata_index,
+            id=doc_id,
+            body=metadata_doc
+        )
+        
+        return {
+            "code": 200,
+            "message": "元数据保存成功",
+            "data": {
+                "filename": filename,
+                "metadata": metadata,
+                "saved_at": metadata_doc["updated_at"]
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {
+            "code": 500,
+            "message": f"元数据保存失败: {str(e)}",
+            "data": None
+        }
+
+
 @app.get("/document/download/{document_name}")
 async def download_document(document_name: str):
     """
@@ -602,6 +715,8 @@ async def download_document(document_name: str):
         raise HTTPException(status_code=500, detail=f"文件下载失败: {str(e)}")
 
 
+# 前端静态文件服务（可选）
+# 如果前端dist文件存在，则提供静态文件服务
 if FRONTEND_INDEX_FILE.exists():
     @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_frontend_app(full_path: str):
@@ -614,4 +729,4 @@ if FRONTEND_INDEX_FILE.exists():
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8006)
+    uvicorn.run(app, host="0.0.0.0", port=8007)

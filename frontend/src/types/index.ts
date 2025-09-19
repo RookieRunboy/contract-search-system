@@ -53,3 +53,28 @@ export interface MenuItem {
   label: string;
   path: string;
 }
+
+// 合同元数据类型（精简版，只包含必要的6个字段）
+export interface ContractMetadata {
+  contract_name: string; // 合同名称（使用上传文件名）
+  party_a: string | null; // 甲方
+  party_b: string | null; // 乙方
+  contract_type: string | null; // 合同类型
+  contract_amount: number | null; // 合同金额
+  project_description: string | null; // 项目描述
+  positions: string | null; // 岗位
+  personnel_list: string | null; // 人员清单
+  extracted_at: string; // 提取时间
+}
+
+// 元数据提取响应类型
+export interface MetadataExtractionResponse {
+  code: number;
+  message: string;
+  data: {
+    filename: string;
+    metadata: ContractMetadata;
+    document_length: number;
+    raw_response?: string;
+  } | null;
+}

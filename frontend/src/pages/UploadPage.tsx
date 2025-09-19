@@ -27,7 +27,7 @@ import {
   CheckCircleOutlined, ExclamationCircleOutlined, ClockCircleOutlined,
   ExperimentOutlined
 } from '@ant-design/icons';
-import { API_BASE_URL, deleteDocument, getUploadedDocuments, extractMetadata } from '../services/api';
+import { API_BASE_URL, deleteDocument, getUploadedDocuments, extractMetadata, saveMetadata } from '../services/api';
 import MetadataEditModal from '../components/MetadataEditModal';
 import type { ContractMetadata } from '../types';
 import type { ColumnsType } from 'antd/es/table';
@@ -333,11 +333,23 @@ const UploadPage: FC = () => {
   };
 
   // 保存元数据
-  const handleSaveMetadata = (metadata: ContractMetadata) => {
-    console.log('保存元数据:', metadata);
-    message.success('元数据保存成功');
-    handleCloseMetadataModal();
-    // 这里可以添加保存到后端的逻辑
+  const handleSaveMetadata = async (metadata: ContractMetadata) => {
+    try {
+      // 获取当前文档的文件名
+      const filename = metadata.contract_name || `${activeContract}.pdf`;
+      
+      // 调用后端API保存元数据
+      await saveMetadata(filename, metadata);
+      
+      message.success('元数据保存成功');
+      handleCloseMetadataModal();
+      
+      // 刷新文档列表以显示最新状态
+      fetchDocuments();
+    } catch (error: any) {
+      console.error('保存元数据失败:', error);
+      message.error(error.response?.data?.message || '保存失败，请重试');
+    }
   };
 
   // 上传配置
@@ -459,14 +471,14 @@ const UploadPage: FC = () => {
       width: '10%',
       render: (_, record) => (
         <Space size="small">
-          <Tooltip title="查看详情" mouseEnterDelay={0.5} mouseLeaveDelay={0}>
+          <Tooltip title="查看详情" mouseEnterDelay={0.5} mouseLeaveDelay={0.1} destroyTooltipOnHide trigger={["hover"]} getPopupContainer={() => document.body}>
             <Button 
               type="text" 
               icon={<EyeOutlined />} 
               onClick={() => showDetail(record)}
             />
           </Tooltip>
-          <Tooltip title="提取元数据" mouseEnterDelay={0.5} mouseLeaveDelay={0}>
+          <Tooltip title="提取元数据" mouseEnterDelay={0.5} mouseLeaveDelay={0.1} destroyTooltipOnHide trigger={["hover"]} getPopupContainer={() => document.body}>
             <Button 
               type="text" 
               icon={<ExperimentOutlined />} 
@@ -474,7 +486,7 @@ const UploadPage: FC = () => {
               onClick={() => handleExtractMetadata(record.contractKey)}
             />
           </Tooltip>
-          <Tooltip title="下载文档" mouseEnterDelay={0.5} mouseLeaveDelay={0}>
+          <Tooltip title="下载文档" mouseEnterDelay={0.5} mouseLeaveDelay={0.1} destroyTooltipOnHide trigger={["hover"]} getPopupContainer={() => document.body}>
             <Button 
               type="text" 
               icon={<DownloadOutlined />} 

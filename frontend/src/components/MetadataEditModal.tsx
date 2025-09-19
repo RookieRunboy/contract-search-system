@@ -60,6 +60,9 @@ const MetadataEditModal: React.FC<MetadataEditModalProps> = ({
       title={`编辑元数据 - ${filename}`}
       open={visible}
       onCancel={handleCancel}
+      destroyOnHidden
+      maskClosable={false}
+      afterClose={() => form.resetFields()}
       width={800}
       footer={[
         <Button key="cancel" onClick={handleCancel}>

@@ -6,7 +6,7 @@ from sentence_transformers import SentenceTransformer
 
 # 初始化 ES
 es = Elasticsearch("http://localhost:9200")
-index_name = "contracts_vector"
+index_name = "contracts_unified"
 
 # 加载 bge-base-zh 模型（CPU 环境可运行）
 model = SentenceTransformer("BAAI/bge-base-zh")

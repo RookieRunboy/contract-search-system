@@ -1,9 +1,11 @@
 import requests
 import json
 import time
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
 from datetime import datetime
 import os
+from sentence_transformers import SentenceTransformer
+import numpy as np
 
 class MetadataExtractor:
     def __init__(self, api_key: Optional[str] = None):
@@ -18,6 +20,14 @@ class MetadataExtractor:
         self.model = "qwen-plus-2025-07-28"
         self.max_retries = 3
         self.retry_delay = 1  # 秒
+        
+        # 初始化向量模型（与正文内容使用相同的模型）
+        try:
+            self.vector_model = SentenceTransformer('BAAI/bge-base-zh')
+            print("向量模型加载成功")
+        except Exception as e:
+            print(f"向量模型加载失败: {e}")
+            self.vector_model = None
     
     def _get_prompt_template(self, contract_type: str = "unknown") -> str:
         """
@@ -274,16 +284,67 @@ CONTRACT_TEXT_PLACEHOLDER
         
         return cleaned_metadata
     
-    def extract_metadata(self, contract_text: str, contract_type: str = "unknown") -> Dict[str, Any]:
+    def _generate_metadata_vector(self, metadata: Dict[str, Any]) -> Optional[np.ndarray]:
         """
-        从合同文本中提取元数据
+        为元数据生成向量
+        
+        Args:
+            metadata: 元数据字典
+        
+        Returns:
+            元数据向量，如果生成失败则返回None
+        """
+        if not self.vector_model:
+            print("向量模型未加载，无法生成元数据向量")
+            return None
+        
+        try:
+            # 将元数据字段拼接成文本
+            metadata_text_parts = []
+            
+            # 按重要性顺序拼接字段
+            if metadata.get('party_a'):
+                metadata_text_parts.append(f"甲方：{metadata['party_a']}")
+            if metadata.get('party_b'):
+                metadata_text_parts.append(f"乙方：{metadata['party_b']}")
+            if metadata.get('contract_type'):
+                contract_type_text = "固定价格合同" if metadata['contract_type'] == 'fp' else "时间材料合同"
+                metadata_text_parts.append(f"合同类型：{contract_type_text}")
+            if metadata.get('contract_amount'):
+                metadata_text_parts.append(f"合同金额：{metadata['contract_amount']}元")
+            if metadata.get('project_description'):
+                metadata_text_parts.append(f"项目描述：{metadata['project_description']}")
+            if metadata.get('positions'):
+                metadata_text_parts.append(f"岗位信息：{metadata['positions']}")
+            if metadata.get('personnel_list'):
+                metadata_text_parts.append(f"人员清单：{metadata['personnel_list']}")
+            
+            # 拼接成完整文本
+            metadata_text = " ".join(metadata_text_parts)
+            
+            if not metadata_text.strip():
+                print("元数据为空，无法生成向量")
+                return None
+            
+            # 生成向量
+            vector = self.vector_model.encode(metadata_text)
+            print(f"成功生成元数据向量，维度：{vector.shape}")
+            return vector
+            
+        except Exception as e:
+            print(f"生成元数据向量失败: {e}")
+            return None
+    
+    def extract_metadata(self, contract_text: str, contract_type: str = "unknown") -> Tuple[Dict[str, Any], Optional[np.ndarray]]:
+        """
+        从合同文本中提取元数据并生成向量
         
         Args:
             contract_text: 合同文本内容
             contract_type: 预期的合同类型，"fp"、"tm"或"unknown"
         
         Returns:
-            包含提取元数据的字典
+            元组：(包含提取元数据的字典, 元数据向量)
         
         Raises:
             Exception: 提取过程中发生错误时抛出异常
@@ -305,19 +366,25 @@ CONTRACT_TEXT_PLACEHOLDER
             # 验证和清理元数据
             cleaned_metadata = self._validate_and_clean_metadata(metadata)
             
-            return {
+            # 生成元数据向量
+            metadata_vector = self._generate_metadata_vector(cleaned_metadata)
+            
+            result = {
                 'success': True,
                 'metadata': cleaned_metadata,
                 'raw_response': response_text
             }
             
+            return result, metadata_vector
+            
         except Exception as e:
-            return {
+            error_result = {
                 'success': False,
                 'error': str(e),
                 'metadata': None,
                 'raw_response': None
             }
+            return error_result, None
 
 # 使用示例
 if __name__ == "__main__":

@@ -187,6 +187,16 @@ export const getUploadedDocuments = async (): Promise<any[]> => {
   }
 };
 
+// 新增：获取文档详情
+export const getDocumentDetail = async (documentName: string): Promise<any> => {
+  try {
+    const result: any = await api.get(`/documents/${encodeURIComponent(documentName)}/detail`);
+    return result;
+  } catch (error: any) {
+    throw new Error(error.response?.data?.detail || error.message || '获取文档详情失败');
+  }
+};
+
 // 删除指定文档
 export const deleteDocument = async (documentName: string): Promise<any> => {
   try {

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { FC } from 'react';
 import { Input, Button, Card, List, Slider, Space, Typography, Empty, Spin, message, Badge, Tag, Checkbox, Progress, Collapse } from 'antd';
 import { FileTextOutlined, ThunderboltOutlined, DownloadOutlined, CaretRightOutlined } from '@ant-design/icons';
-import { searchDocuments, downloadDocument, getDocumentList, deleteDocument, clearAllDocuments, extractMetadata } from '../services/api';
+import { searchDocuments, downloadDocument, extractMetadata } from '../services/api';
 import type { ContractSearchResult, ContractMetadata } from '../types/index';
 import MetadataEditModal from '../components/MetadataEditModal';
 
@@ -19,12 +19,10 @@ const SearchPage: FC = () => {
   const [selectedDocuments, setSelectedDocuments] = useState<Set<string>>(new Set());
   const [batchDownloading, setBatchDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
-  const [selectedContracts, setSelectedContracts] = useState<Set<string>>(new Set());
-  const [allDocuments, setAllDocuments] = useState<string[]>([]);
   const [metadataModalVisible, setMetadataModalVisible] = useState(false);
   const [currentMetadata, setCurrentMetadata] = useState<ContractMetadata | null>(null);
   const [currentFilename, setCurrentFilename] = useState<string>('');
-  const [extractingMetadata, setExtractingMetadata] = useState<Set<string>>(new Set());
+
 
   const handleSearch = async () => {
     if (!searchQuery.trim()) {
@@ -98,31 +96,7 @@ const SearchPage: FC = () => {
     }
   };
 
-  // 处理元数据提取
-  const handleExtractMetadata = async (filename: string) => {
-    try {
-      setExtractingMetadata(prev => new Set(prev).add(filename));
-      const response = await extractMetadata(filename);
-      
-      if (response.code === 200 && response.data) {
-        setCurrentMetadata(response.data.metadata);
-        setCurrentFilename(filename);
-        setMetadataModalVisible(true);
-        message.success('元数据提取成功！');
-      } else {
-        message.error(response.message || '元数据提取失败');
-      }
-    } catch (error: any) {
-      console.error('元数据提取失败:', error);
-      message.error(error.response?.data?.message || '元数据提取失败，请重试');
-    } finally {
-      setExtractingMetadata(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(filename);
-        return newSet;
-      });
-    }
-  };
+
 
   // 关闭元数据弹窗
   const handleCloseMetadataModal = () => {
@@ -523,15 +497,7 @@ const SearchPage: FC = () => {
                           >
                             导出原文
                           </Button>
-                          <Button
-                            type="default"
-                            size="small"
-                            loading={extractingMetadata.has(contract.contract_name)}
-                            onClick={() => handleExtractMetadata(contract.contract_name)}
-                            style={{ marginLeft: '8px' }}
-                          >
-                            提取元数据
-                          </Button>
+
                         </Space>
                       </div>
                     }

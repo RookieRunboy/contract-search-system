@@ -3,7 +3,7 @@ import numpy as np
 from sentence_transformers import SentenceTransformer
 
 es = Elasticsearch("http://localhost:9200")
-index_name = "contracts_vector"
+index_name = "contracts_unified"
 query_text = "银华基金管理股份有限公司"
 
 # 加载中文向量模型（已提前安装并准备好）

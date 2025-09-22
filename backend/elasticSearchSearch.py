@@ -8,7 +8,7 @@ class ElasticsearchVectorSearch:
     def __init__(
             self,
             es_host: str = "http://localhost:9200",
-            index_name: str = "contracts_vector",
+            index_name: str = "contracts_unified",
             model_name: str = "BAAI/bge-base-zh"
     ):
         """
@@ -32,6 +32,44 @@ class ElasticsearchVectorSearch:
 
     def search(
             self,
+            query_text: str = None,
+            query_metadata: str = None,
+            search_mode: str = "content",
+            top_k: int = 3,
+            text_standard: int = 3,
+            text_ngram: int = 1,
+            vector_weight: float = 5.0,
+            metadata_weight: float = 3.0,
+            fuzziness: str = "AUTO"
+    ) -> List[Dict[str, Any]]:
+        """
+        执行搜索
+        
+        Args:
+            query_text: 内容查询文本
+            query_metadata: 元数据查询文本
+            search_mode: 搜索模式 ('content', 'metadata', 'hybrid')
+            top_k: 返回结果数量
+            text_standard: 标准文本字段权重
+            text_ngram: ngram字段权重
+            vector_weight: 向量搜索权重
+            metadata_weight: 元数据搜索权重
+            fuzziness: 模糊匹配程度
+        
+        Returns:
+            搜索结果列表
+        """
+        if search_mode == "content":
+            return self._search_content(query_text, top_k, text_standard, text_ngram, vector_weight, fuzziness)
+        elif search_mode == "metadata":
+            return self._search_metadata(query_metadata, top_k, metadata_weight, fuzziness)
+        elif search_mode == "hybrid":
+            return self._search_hybrid(query_text, query_metadata, top_k, text_standard, text_ngram, vector_weight, metadata_weight, fuzziness)
+        else:
+            raise ValueError(f"不支持的搜索模式: {search_mode}")
+    
+    def _search_content(
+            self,
             query_text: str,
             top_k: int = 3,
             text_standard: int = 3,
@@ -39,6 +77,11 @@ class ElasticsearchVectorSearch:
             vector_weight: float = 5.0,
             fuzziness: str = "AUTO"
     ) -> List[Dict[str, Any]]:
+        """
+        内容搜索（原有逻辑）
+        """
+        if not query_text:
+            return []
         # 构建检索字段（支持标准字段与 ngram 子字段的权重）
         text_fields: List[str] = []
         if isinstance(text_standard, (int, float)) and text_standard > 0:
@@ -99,6 +142,200 @@ class ElasticsearchVectorSearch:
         except Exception as e:
             print(f"搜索错误: {str(e)}")
             return []
+    
+    def _search_metadata(
+            self,
+            query_metadata: str,
+            top_k: int = 3,
+            metadata_weight: float = 3.0,
+            fuzziness: str = "AUTO"
+    ) -> List[Dict[str, Any]]:
+        """
+        元数据搜索
+        """
+        if not query_metadata:
+            return []
+        
+        # 生成查询向量
+        query_vector = self.model.encode(query_metadata).tolist()
+        
+        # 构建元数据字段搜索
+        metadata_fields = [
+            f"document_metadata.party_a^{metadata_weight}",
+            f"document_metadata.party_b^{metadata_weight}",
+            f"document_metadata.project_description^{metadata_weight * 0.8}",
+            f"document_metadata.positions^{metadata_weight * 0.6}",
+            f"document_metadata.personnel_list^{metadata_weight * 0.6}"
+        ]
+        
+        # 构建搜索体
+        body = {
+            "size": top_k,
+            "query": {
+                "function_score": {
+                    "query": {
+                        "bool": {
+                            "must": [
+                                {"term": {"pageId": 1}},  # 只搜索第一页（包含元数据）
+                                {
+                                    "multi_match": {
+                                        "query": query_metadata,
+                                        "type": "best_fields",
+                                        "fields": metadata_fields,
+                                        "operator": "or",
+                                        "fuzziness": fuzziness
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "boost_mode": "sum",
+                    "functions": [
+                        {
+                            "script_score": {
+                                "script": {
+                                    "source": """
+                                        if (doc['document_metadata.metadata_vector'].size() > 0) {
+                                            return cosineSimilarity(params.query_vector, 'document_metadata.metadata_vector') + 1.0;
+                                        } else {
+                                            return 1.0;
+                                        }
+                                    """,
+                                    "params": {
+                                        "query_vector": query_vector
+                                    }
+                                }
+                            },
+                            "weight": metadata_weight
+                        }
+                    ]
+                }
+            },
+            "highlight": {
+                "fields": {
+                    "document_metadata.party_a": {},
+                    "document_metadata.party_b": {},
+                    "document_metadata.project_description": {},
+                    "document_metadata.positions": {},
+                    "document_metadata.personnel_list": {}
+                }
+            }
+        }
+        
+        # 执行搜索
+        try:
+            results = self.es.search(index=self.index_name, body=body)
+            return self._process_metadata_results(results)
+        except Exception as e:
+            print(f"元数据搜索错误: {str(e)}")
+            return []
+    
+    def _search_hybrid(
+            self,
+            query_text: str,
+            query_metadata: str,
+            top_k: int = 3,
+            text_standard: int = 3,
+            text_ngram: int = 1,
+            vector_weight: float = 5.0,
+            metadata_weight: float = 3.0,
+            fuzziness: str = "AUTO"
+    ) -> List[Dict[str, Any]]:
+        """
+        混合搜索（内容 + 元数据）
+        """
+        content_results = []
+        metadata_results = []
+        
+        # 执行内容搜索
+        if query_text:
+            content_results = self._search_content(query_text, top_k * 2, text_standard, text_ngram, vector_weight, fuzziness)
+        
+        # 执行元数据搜索
+        if query_metadata:
+            metadata_results = self._search_metadata(query_metadata, top_k * 2, metadata_weight, fuzziness)
+        
+        # 合并和重新排序结果
+        return self._merge_results(content_results, metadata_results, top_k)
+    
+    def _merge_results(
+            self,
+            content_results: List[Dict[str, Any]],
+            metadata_results: List[Dict[str, Any]],
+            top_k: int
+    ) -> List[Dict[str, Any]]:
+        """
+        合并内容搜索和元数据搜索结果
+        """
+        # 使用合同名称作为键来合并结果
+        merged_dict = {}
+        
+        # 处理内容搜索结果
+        for result in content_results:
+            contract_name = result['contract_name']
+            if contract_name not in merged_dict:
+                merged_dict[contract_name] = {
+                    'contract_name': contract_name,
+                    'content_score': result['score'],
+                    'metadata_score': 0,
+                    'combined_score': result['score'],
+                    'content_pages': [],
+                    'metadata_info': None,
+                    'highlights': result.get('highlights', {})
+                }
+            
+            merged_dict[contract_name]['content_pages'].append({
+                'page_id': result['page_id'],
+                'text': result['text'],
+                'score': result['score']
+            })
+        
+        # 处理元数据搜索结果
+        for result in metadata_results:
+            contract_name = result['contract_name']
+            if contract_name not in merged_dict:
+                merged_dict[contract_name] = {
+                    'contract_name': contract_name,
+                    'content_score': 0,
+                    'metadata_score': result['score'],
+                    'combined_score': result['score'],
+                    'content_pages': [],
+                    'metadata_info': result.get('metadata_info'),
+                    'highlights': result.get('highlights', {})
+                }
+            else:
+                merged_dict[contract_name]['metadata_score'] = result['score']
+                merged_dict[contract_name]['combined_score'] += result['score']
+                merged_dict[contract_name]['metadata_info'] = result.get('metadata_info')
+                # 合并高亮信息
+                merged_dict[contract_name]['highlights'].update(result.get('highlights', {}))
+        
+        # 按综合得分排序并返回前top_k个结果
+        sorted_results = sorted(
+            merged_dict.values(),
+            key=lambda x: x['combined_score'],
+            reverse=True
+        )
+        
+        return sorted_results[:top_k]
+    
+    def _process_metadata_results(self, results: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        处理元数据搜索结果
+        """
+        processed_results = []
+        for hit in results["hits"]["hits"]:
+            metadata_info = hit["_source"].get("document_metadata", {})
+            result = {
+                "score": hit["_score"],
+                "contract_name": hit["_source"]["contractName"],
+                "page_id": hit["_source"]["pageId"],
+                "text": hit["_source"]["text"],
+                "metadata_info": metadata_info,
+                "highlights": hit.get("highlight", {})
+            }
+            processed_results.append(result)
+        return processed_results
 
     def index_document_chunks(self, chunks: List[Dict], filename: str):
         """

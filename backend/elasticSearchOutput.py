@@ -3,7 +3,7 @@ from elasticsearch import helpers
 from pathlib import Path
 
 class get_document_by_filename:
-    def __init__(self, es_host="http://localhost:9200", index_name="contracts_vector"):
+    def __init__(self, es_host="http://localhost:9200", index_name="contracts_unified"):
         self.es = Elasticsearch(es_host)
         self.index_name = index_name
     

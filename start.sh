@@ -276,8 +276,8 @@ main() {
     start_elasticsearch
     install_dependencies
     create_index
-    start_backend
     build_frontend
+    start_backend
     
     show_status
 }

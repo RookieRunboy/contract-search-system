@@ -33,7 +33,7 @@ except Exception as e:
 
 # Elasticsearch 连接
 es = Elasticsearch("http://localhost:9200")
-index_name = "contracts_vector"
+index_name = "contracts_unified"
 
 # 请求体模型
 class SearchRequest(BaseModel):

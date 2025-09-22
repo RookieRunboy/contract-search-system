@@ -5,7 +5,7 @@ class ElasticsearchDocumentDeleter:
     def __init__(
         self,
         es_host: str = "http://localhost:9200",
-        index_name: str = "contracts_vector"
+        index_name: str = "contracts_unified"
     ):
         """
         初始化Elasticsearch文档删除器
@@ -95,6 +95,12 @@ class ElasticsearchDocumentDeleter:
                 body=query
             )
 
+            # 立即刷新索引，确保后续查询能够看到最新状态
+            try:
+                self.es.indices.refresh(index=self.index_name)
+            except Exception as refresh_err:
+                print(f"刷新索引时发生警告: {refresh_err}")
+
             cleanup_result = self._remove_local_files(normalized)
 
             return {
@@ -141,6 +147,11 @@ class ElasticsearchDocumentDeleter:
                 index=self.index_name,
                 body=query
             )
+
+            try:
+                self.es.indices.refresh(index=self.index_name)
+            except Exception as refresh_err:
+                print(f"刷新索引时发生警告: {refresh_err}")
 
             return {
                 "status": "success",

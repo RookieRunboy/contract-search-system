@@ -4,6 +4,7 @@ export interface DocumentChunk {
   page_id: number;
   text: string;
   highlights: Record<string, any>;
+  metadata_highlights?: Record<string, string[]>; // 元数据高亮信息
 }
 
 // 合同搜索结果类型
@@ -11,6 +12,8 @@ export interface ContractSearchResult {
   contract_name: string;
   score: number;
   chunks: DocumentChunk[];
+  metadata_info?: ContractMetadata; // 合同元数据信息
+  metadata_score?: number; // 元数据匹配分数
 }
 
 // 搜索结果类型（保持向后兼容）
@@ -59,7 +62,7 @@ export interface ContractMetadata {
   contract_name: string; // 合同名称（使用上传文件名）
   party_a: string | null; // 甲方
   party_b: string | null; // 乙方
-  contract_type: string | null; // 合同类型
+  contract_type: string | null; // 合同方向
   contract_amount: number | null; // 合同金额
   project_description: string | null; // 项目描述
   positions: string | null; // 岗位

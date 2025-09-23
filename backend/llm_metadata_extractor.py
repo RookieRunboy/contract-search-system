@@ -34,7 +34,7 @@ class MetadataExtractor:
         根据合同类型获取相应的Prompt模板
         
         Args:
-            contract_type: 合同类型，"fp"（固定价格）、"tm"（时间材料）或"unknown"
+            contract_type: 合同方向，"金融方向"、"互联网方向"、"电信方向"或"其他"
         
         Returns:
             格式化的Prompt字符串
@@ -45,7 +45,7 @@ class MetadataExtractor:
         必须提取的字段：
         - party_a: 甲方名称
         - party_b: 乙方名称
-        - contract_type: 客户类型（"fp"表示固定价格合同，"tm"表示时间材料合同，如果无法确定则为null）
+        - contract_type: 合同方向（金融方向【银行、保险、证券】、互联网方向、电信方向、其他）
         - contract_amount: 合同金额（数字，如果有多个金额取总金额）
         - project_description: 合同内容（项目描述或服务内容）
         - positions: 岗位信息
@@ -58,7 +58,7 @@ class MetadataExtractor:
 必须提取的字段：
 - party_a: 甲方名称
 - party_b: 乙方名称
-- contract_type: 客户类型（"fp"表示固定价格合同，"tm"表示时间材料合同，如果无法确定则为null）
+- contract_type: 合同方向（金融方向【银行、保险、证券】、互联网方向、电信方向、其他）
 - contract_amount: 合同金额（数字，如果有多个金额取总金额）
 - project_description: 合同内容（项目描述或服务内容）
 - positions: 岗位信息
@@ -79,7 +79,7 @@ CONTRACT_TEXT_PLACEHOLDER
 {
   "party_a": "甲方名称",
   "party_b": "乙方名称", 
-  "contract_type": "fp或tm或null",
+  "contract_type": "合同方向或null",
   "contract_amount": 数字或null,
   "project_description": "合同内容描述",
   "positions": "岗位信息",
@@ -268,9 +268,8 @@ CONTRACT_TEXT_PLACEHOLDER
         for field in required_fields:
             cleaned_metadata[field] = metadata.get(field, None)
         
-        # 验证合同类型
-        if cleaned_metadata['contract_type'] not in ['fp', 'tm', None]:
-            cleaned_metadata['contract_type'] = None
+        # 验证合同类型（现在接受任何字符串值，如'金融方向', '互联网方向', '电信方向', '其他'等）
+        # 不再限制为特定值，允许更灵活的合同方向分类
         
         # 验证合同金额
         if cleaned_metadata['contract_amount']:
@@ -308,8 +307,7 @@ CONTRACT_TEXT_PLACEHOLDER
             if metadata.get('party_b'):
                 metadata_text_parts.append(f"乙方：{metadata['party_b']}")
             if metadata.get('contract_type'):
-                contract_type_text = "固定价格合同" if metadata['contract_type'] == 'fp' else "时间材料合同"
-                metadata_text_parts.append(f"合同类型：{contract_type_text}")
+                metadata_text_parts.append(f"合同方向：{metadata['contract_type']}")
             if metadata.get('contract_amount'):
                 metadata_text_parts.append(f"合同金额：{metadata['contract_amount']}元")
             if metadata.get('project_description'):
@@ -341,7 +339,7 @@ CONTRACT_TEXT_PLACEHOLDER
         
         Args:
             contract_text: 合同文本内容
-            contract_type: 预期的合同类型，"fp"、"tm"或"unknown"
+            contract_type: 预期的合同方向，如"金融方向"、"互联网方向"、"电信方向"、"其他"或"unknown"
         
         Returns:
             元组：(包含提取元数据的字典, 元数据向量)

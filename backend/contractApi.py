@@ -620,14 +620,14 @@ async def extract_metadata(filename: str = Query(..., description="要提取元�
             raise HTTPException(status_code=404, detail="文档不存在或无法获取文档内容")
         
         # 调用LLM进行元数据提取
-        extraction_result = await run_in_threadpool(
+        result, metadata_vector = await run_in_threadpool(
             metadata_extractor.extract_metadata, 
             document_text
         )
         
-        if extraction_result['success']:
+        if result['success']:
             # 确保元数据中包含合同名称（使用文件名）
-            metadata = extraction_result['metadata'].copy()
+            metadata = result['metadata'].copy()
             metadata['contract_name'] = filename
             
             return {
@@ -637,16 +637,16 @@ async def extract_metadata(filename: str = Query(..., description="要提取元�
                     "filename": filename,
                     "metadata": metadata,
                     "document_length": len(document_text),
-                    "raw_response": extraction_result.get('raw_response')
+                    "raw_response": result.get('raw_response')
                 }
             }
         else:
             return {
                 "code": 500,
-                "message": f"元数据提取失败: {extraction_result['error']}",
+                "message": f"元数据提取失败: {result['error']}",
                 "data": {
                     "filename": filename,
-                    "error": extraction_result['error'],
+                    "error": result['error'],
                     "document_length": len(document_text)
                 }
             }

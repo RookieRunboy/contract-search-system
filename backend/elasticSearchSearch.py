@@ -164,6 +164,7 @@ class ElasticsearchVectorSearch:
             f"document_metadata.party_a^{metadata_weight}",
             f"document_metadata.party_b^{metadata_weight}",
             f"document_metadata.project_description^{metadata_weight * 0.8}",
+            f"document_metadata.contract_type^{metadata_weight * 0.7}",
             f"document_metadata.positions^{metadata_weight * 0.6}",
             f"document_metadata.personnel_list^{metadata_weight * 0.6}"
         ]
@@ -216,6 +217,7 @@ class ElasticsearchVectorSearch:
                     "document_metadata.party_a": {},
                     "document_metadata.party_b": {},
                     "document_metadata.project_description": {},
+                    "document_metadata.contract_type": {},
                     "document_metadata.positions": {},
                     "document_metadata.personnel_list": {}
                 }

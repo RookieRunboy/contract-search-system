@@ -171,10 +171,14 @@ const formatContractTypeLabel = (contractType?: string | null): string => {
     return '未分类';
   }
   switch (contractType) {
-    case 'fp':
-      return '固定价格合同';
-    case 'tm':
-      return '时间材料合同';
+    case '金融方向':
+      return '金融方向';
+    case '互联网方向':
+      return '互联网方向';
+    case '电信方向':
+      return '电信方向';
+    case '其他':
+      return '其他';
     default:
       return contractType;
   }
@@ -212,7 +216,7 @@ interface DocumentDetail {
     signing_date?: string;
     party_a?: string;
     party_b?: string;
-    customer_type?: string;
+    contract_type?: string;
     contract_amount?: number;
     contract_content_summary?: string;
     positions?: string;
@@ -610,7 +614,7 @@ const UploadPage: FC = () => {
                 <Descriptions bordered size="small" column={2}>
                   <Descriptions.Item label="甲方">{detailMetadata.party_a ?? '-'}</Descriptions.Item>
                   <Descriptions.Item label="乙方">{detailMetadata.party_b ?? '-'}</Descriptions.Item>
-                  <Descriptions.Item label="客户类型">{formatContractTypeLabel(detailMetadata.contract_type)}</Descriptions.Item>
+                  <Descriptions.Item label="合同方向">{formatContractTypeLabel(detailMetadata.contract_type)}</Descriptions.Item>
                   <Descriptions.Item label="合同金额">{formatAmountDisplay(detailMetadata.contract_amount)}</Descriptions.Item>
                   <Descriptions.Item label="岗位信息" span={2}>{detailMetadata.positions ?? '-'}</Descriptions.Item>
                   <Descriptions.Item label="人员清单" span={2}>{detailMetadata.personnel_list ?? '-'}</Descriptions.Item>

@@ -8,7 +8,6 @@ import MetadataEditModal from '../components/MetadataEditModal';
 
 const { Title, Text } = Typography;
 const { Search } = Input;
-const { Panel } = Collapse;
 
 const SearchPage: FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
@@ -59,6 +58,31 @@ const SearchPage: FC = () => {
         part
       )
     );
+  };
+
+  // 元数据高亮函数
+  const highlightMetadataText = (text: string, highlights?: string[]) => {
+    if (!highlights || highlights.length === 0) return text;
+    
+    let highlightedText = text;
+    highlights.forEach((keyword) => {
+      const regex = new RegExp(`(${keyword})`, 'gi');
+      highlightedText = highlightedText.replace(regex, '<mark style="background-color: #fff2e6; color: #d46b08; padding: 1px 2px; border-radius: 2px;">$1</mark>');
+    });
+    
+    return <span dangerouslySetInnerHTML={{ __html: highlightedText }} />;
+  };
+
+  // 获取元数据字段的高亮关键词
+  const getMetadataHighlights = (contract: ContractSearchResult, fieldName: string): string[] => {
+    // 从chunks中收集该字段的高亮信息
+    const highlights: string[] = [];
+    contract.chunks.forEach(chunk => {
+      if (chunk.metadata_highlights && chunk.metadata_highlights[fieldName]) {
+        highlights.push(...chunk.metadata_highlights[fieldName]);
+      }
+    });
+    return [...new Set(highlights)]; // 去重
   };
 
   const getScoreColor = (score: number) => {
@@ -473,6 +497,9 @@ const SearchPage: FC = () => {
                               {contract.contract_name}
                             </Text>
                             <Tag color="green">{contract.chunks.length} 个相关段落</Tag>
+                            {contract.metadata_score && contract.metadata_score > 0 && (
+                              <Tag color="purple">元数据匹配</Tag>
+                            )}
                           </Space>
                         </div>
                         <Space>
@@ -488,6 +515,13 @@ const SearchPage: FC = () => {
                           >
                             {contract.score.toFixed(1)}
                           </Text>
+                          {contract.metadata_score && contract.metadata_score > 0 && (
+                            <Text 
+                              style={{ color: '#722ed1', fontSize: '12px' }}
+                            >
+                              (元数据: {contract.metadata_score.toFixed(1)})
+                            </Text>
+                          )}
                           <Button
                             type="primary"
                             size="small"
@@ -502,30 +536,121 @@ const SearchPage: FC = () => {
                       </div>
                     }
                   >
+                    {/* 元数据信息展示区域 */}
+                    {contract.metadata_info && (
+                      <div style={{ 
+                        marginBottom: '16px', 
+                        padding: '12px', 
+                        background: '#f8f9fa', 
+                        borderRadius: '8px',
+                        border: '1px solid #e9ecef'
+                      }}>
+                        <div style={{ 
+                          display: 'flex', 
+                          alignItems: 'center', 
+                          marginBottom: '8px',
+                          gap: '8px'
+                        }}>
+                          <Text strong style={{ color: '#722ed1' }}>📋 合同信息</Text>
+                          {contract.metadata_score && contract.metadata_score > 0 && (
+                            <Tag color="purple" size="small">
+                              匹配度: {contract.metadata_score.toFixed(1)}
+                            </Tag>
+                          )}
+                        </div>
+                        <div style={{ 
+                           display: 'grid', 
+                           gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', 
+                           gap: '8px',
+                           fontSize: '13px'
+                         }}>
+                           {contract.metadata_info.party_a && (
+                             <div>
+                               <Text type="secondary">甲方：</Text>
+                               <Text>
+                                 {highlightMetadataText(
+                                   contract.metadata_info.party_a, 
+                                   getMetadataHighlights(contract, 'party_a')
+                                 )}
+                               </Text>
+                             </div>
+                           )}
+                           {contract.metadata_info.party_b && (
+                             <div>
+                               <Text type="secondary">乙方：</Text>
+                               <Text>
+                                 {highlightMetadataText(
+                                   contract.metadata_info.party_b, 
+                                   getMetadataHighlights(contract, 'party_b')
+                                 )}
+                               </Text>
+                             </div>
+                           )}
+                           {contract.metadata_info.contract_type && (
+                             <div>
+                               <Text type="secondary">合同方向：</Text>
+                               <Text>
+                                 {highlightMetadataText(
+                                   contract.metadata_info.contract_type, 
+                                   getMetadataHighlights(contract, 'contract_type')
+                                 )}
+                               </Text>
+                             </div>
+                           )}
+                           {contract.metadata_info.contract_amount && (
+                             <div>
+                               <Text type="secondary">合同金额：</Text>
+                               <Text>
+                                 {highlightMetadataText(
+                                   String(contract.metadata_info.contract_amount), 
+                                   getMetadataHighlights(contract, 'contract_amount')
+                                 )}
+                               </Text>
+                             </div>
+                           )}
+                           {contract.metadata_info.project_description && (
+                             <div style={{ gridColumn: '1 / -1' }}>
+                               <Text type="secondary">项目描述：</Text>
+                               <Text>
+                                 {highlightMetadataText(
+                                   contract.metadata_info.project_description, 
+                                   getMetadataHighlights(contract, 'project_description')
+                                 )}
+                               </Text>
+                             </div>
+                           )}
+                         </div>
+                      </div>
+                    )}
                     <Collapse 
                       ghost 
                       expandIcon={({ isActive }) => <CaretRightOutlined rotate={isActive ? 90 : 0} />}
                       defaultActiveKey={['0']}
-                    >
-                      <Panel header={`查看相关段落 (${contract.chunks.length}个)`} key="0">
-                        <List
-                          dataSource={contract.chunks}
-                          renderItem={(chunk) => (
-                            <List.Item style={{ padding: '8px 0', borderBottom: '1px solid #f0f0f0' }}>
-                              <div style={{ width: '100%' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                                  <Tag color="blue">第 {chunk.page_id} 页</Tag>
-                                  <Text type="secondary">相关度: {chunk.score.toFixed(2)}</Text>
-                                </div>
-                                <div className="result-content">
-                                  {highlightText(chunk.text, searchQuery)}
-                                </div>
-                              </div>
-                            </List.Item>
-                          )}
-                        />
-                      </Panel>
-                    </Collapse>
+                      items={[
+                        {
+                          key: '0',
+                          label: `查看相关段落 (${contract.chunks.length}个)`,
+                          children: (
+                            <List
+                              dataSource={contract.chunks}
+                              renderItem={(chunk) => (
+                                <List.Item style={{ padding: '8px 0', borderBottom: '1px solid #f0f0f0' }}>
+                                  <div style={{ width: '100%' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                                      <Tag color="blue">第 {chunk.page_id} 页</Tag>
+                                      <Text type="secondary">相关度: {chunk.score.toFixed(2)}</Text>
+                                    </div>
+                                    <div className="result-content">
+                                      {highlightText(chunk.text, searchQuery)}
+                                    </div>
+                                  </div>
+                                </List.Item>
+                              )}
+                            />
+                          )
+                        }
+                      ]}
+                    />
                   </Card>
                 </List.Item>
               );

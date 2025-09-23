@@ -166,7 +166,7 @@ example_doc_page1 = {
     "document_metadata": {
         "party_a": "甲方公司",
         "party_b": "乙方公司", 
-        "contract_type": "fp",
+        "contract_type": "金融方向",
         "contract_amount": 1000000.0,
         "project_description": "系统开发项目",
         "positions": "技术经理、开发工程师",

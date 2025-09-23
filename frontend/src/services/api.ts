@@ -73,17 +73,24 @@ const normalizeSearchList = (rawList: unknown): ContractSearchResult[] => {
 
   if (firstItem && Array.isArray((firstItem as any).chunks)) {
     return rawList.map((item) => {
-      const contractItem = item as RawSearchChunk & { chunks: RawSearchChunk[] };
+      const contractItem = item as RawSearchChunk & { 
+        chunks: RawSearchChunk[]; 
+        metadata_info?: any;
+        metadata_score?: number;
+      };
       const contractName = toStringValue(contractItem.contract_name) ?? toStringValue(contractItem.contractName);
       return {
         contract_name: contractName ?? '未知合同',
         score: toNumber(contractItem.score),
+        metadata_info: contractItem.metadata_info,
+        metadata_score: toNumber(contractItem.metadata_score),
         chunks: Array.isArray(contractItem.chunks)
           ? contractItem.chunks.map((chunk) => ({
             score: toNumber(chunk.score),
             page_id: toNumber(chunk.page_id ?? chunk.pageId ?? chunk.page_num ?? chunk.pageNum, 0),
             text: toStringValue(chunk.text ?? chunk.content) ?? '',
             highlights: (chunk.highlights && typeof chunk.highlights === 'object') ? (chunk.highlights as Record<string, any>) : {},
+            metadata_highlights: (chunk as any).metadata_highlights,
             })) as DocumentChunk[]
           : [],
       };
@@ -93,7 +100,10 @@ const normalizeSearchList = (rawList: unknown): ContractSearchResult[] => {
   const grouped = new Map<string, ContractSearchResult>();
 
   rawList.forEach((item) => {
-    const record = item as RawSearchChunk;
+    const record = item as RawSearchChunk & {
+      metadata_info?: any;
+      metadata_score?: number;
+    };
     const contractName = toStringValue(record.contract_name) ?? toStringValue(record.contractName);
     if (!contractName) {
       return;
@@ -104,12 +114,15 @@ const normalizeSearchList = (rawList: unknown): ContractSearchResult[] => {
       page_id: toNumber(record.page_id ?? record.pageId ?? record.page_num ?? record.pageNum, 0),
       text: toStringValue(record.text ?? record.content) ?? '',
       highlights: (record.highlights && typeof record.highlights === 'object') ? (record.highlights as Record<string, any>) : {},
+      metadata_highlights: (record as any).metadata_highlights,
     };
 
     if (!grouped.has(contractName)) {
       grouped.set(contractName, {
         contract_name: contractName,
         score: chunk.score,
+        metadata_info: record.metadata_info,
+        metadata_score: toNumber(record.metadata_score),
         chunks: [chunk],
       });
       return;
@@ -117,6 +130,11 @@ const normalizeSearchList = (rawList: unknown): ContractSearchResult[] => {
 
     const existing = grouped.get(contractName)!;
     existing.score = Math.max(existing.score, chunk.score);
+    // 保留第一个遇到的metadata_info
+    if (!existing.metadata_info && record.metadata_info) {
+      existing.metadata_info = record.metadata_info;
+      existing.metadata_score = toNumber(record.metadata_score);
+    }
     existing.chunks.push(chunk);
   });
 

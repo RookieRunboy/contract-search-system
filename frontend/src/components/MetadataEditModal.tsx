@@ -215,13 +215,15 @@ const MetadataEditModal: React.FC<MetadataEditModalProps> = ({
             </Form.Item>
 
             <Form.Item
-              label="客户类型"
+              label="合同方向"
               name="contract_type"
-              rules={[{ required: true, message: '请选择客户类型' }]}
+              rules={[{ required: true, message: '请选择合同方向' }]}
             >
-              <Select placeholder="请选择客户类型">
-                <Option value="fp">固定价格合同</Option>
-                <Option value="tm">时间材料合同</Option>
+              <Select placeholder="请选择合同方向">
+                <Option value="金融方向">金融方向</Option>
+                <Option value="互联网方向">互联网方向</Option>
+                <Option value="电信方向">电信方向</Option>
+                <Option value="其他">其他</Option>
               </Select>
             </Form.Item>
 

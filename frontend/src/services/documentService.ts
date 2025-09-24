@@ -1,4 +1,5 @@
-import api from './api';
+import api, { normalizeSearchList } from './api';
+import type { ContractSearchResult } from '../types';
 
 export interface SearchResult {
   contractName: string;

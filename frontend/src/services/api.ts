@@ -64,7 +64,7 @@ const toStringValue = (value: unknown): string | undefined => {
   return typeof value === 'string' && value.trim() !== '' ? value : undefined;
 };
 
-const normalizeSearchList = (rawList: unknown): ContractSearchResult[] => {
+export const normalizeSearchList = (rawList: unknown): ContractSearchResult[] => {
   if (!Array.isArray(rawList)) {
     return [];
   }

@@ -5,7 +5,7 @@ import SearchPage from './pages/SearchPage';
 import UploadPage from './pages/UploadPage';
 import './App.css';
 
-const { Header, Sider, Content } = Layout;
+const { Sider, Content } = Layout;
 const { Title } = Typography;
 
 function App() {
@@ -77,17 +77,6 @@ function App() {
         />
       </Sider>
       <Layout>
-        <Header style={{ display: 'flex', alignItems: 'center' }}>
-          <Title level={3} style={{ 
-            margin: 0, 
-            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-            WebkitBackgroundClip: 'text',
-            WebkitTextFillColor: 'transparent',
-            fontWeight: 600
-          }}>
-            {selectedKey === 'search' ? '🔍 智能文档搜索' : '📋 合同管理'}
-          </Title>
-        </Header>
         <Content>
           {renderContent()}
         </Content>

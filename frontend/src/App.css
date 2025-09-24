@@ -86,15 +86,7 @@ body {
   margin: 8px 0 8px 8px;
 }
 
-.ant-layout-header {
-  background: rgba(255, 255, 255, 0.95) !important;
-  backdrop-filter: blur(10px);
-  padding: 0 32px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
-  border-radius: 16px;
-  margin: 8px 16px 0 8px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-}
+
 
 .ant-layout-content {
   padding: 24px;
@@ -604,7 +596,6 @@ body {
 
 .file-delete-button {
   border-radius: 8px;
-}
   background: linear-gradient(90deg, #667eea 0%, #764ba2 100%) !important;
 }
 

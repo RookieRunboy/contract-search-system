@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import type { FC } from 'react';
-import { Input, Button, Card, List, Slider, Space, Typography, Empty, Spin, message, Badge, Tag, Checkbox, Progress, Collapse, DatePicker, InputNumber, Row, Col } from 'antd';
+import { Input, Button, Card, List, Space, Typography, Empty, Spin, message, Badge, Tag, Checkbox, Progress, Collapse, DatePicker, InputNumber, Row, Col } from 'antd';
 import { FileTextOutlined, ThunderboltOutlined, DownloadOutlined, CaretRightOutlined, FilterOutlined } from '@ant-design/icons';
-import { searchDocuments, downloadDocument, extractMetadata } from '../services/api';
+import { searchDocuments, downloadDocument } from '../services/api';
 import type { ContractSearchResult, ContractMetadata } from '../types/index';
 import type { SearchFilters } from '../services/api';
 import MetadataEditModal from '../components/MetadataEditModal';
@@ -406,22 +406,7 @@ const SearchPage: FC = () => {
             />
           </div>
 
-          <div className="slider-container">
-            <div className="slider-header">
-              <Text className="slider-label">返回结果数量</Text>
-              <Badge 
-                count={topK} 
-                className="slider-badge" 
-              />
-            </div>
-            <Slider
-              min={1}
-              max={20}
-              value={topK}
-              onChange={setTopK}
-              tooltip={{ formatter: (value) => `${value} 条结果` }}
-            />
-          </div>
+
 
           {/* 高级筛选区域 */}
           <div style={{ marginTop: '16px' }}>
@@ -475,7 +460,7 @@ const SearchPage: FC = () => {
                           value={amountMin}
                           onChange={setAmountMin}
                           formatter={value => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
-                          parser={value => value!.replace(/\$\s?|(,*)/g, '')}
+                          parser={value => parseFloat(value!.replace(/\$\s?|(,*)/g, '')) || 0}
                         />
                       </Col>
                       <Col span={12}>
@@ -486,10 +471,23 @@ const SearchPage: FC = () => {
                           value={amountMax}
                           onChange={setAmountMax}
                           formatter={value => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
-                          parser={value => value!.replace(/\$\s?|(,*)/g, '')}
+                          parser={value => parseFloat(value!.replace(/\$\s?|(,*)/g, '')) || 0}
                         />
                       </Col>
                     </Row>
+                  </Col>
+                  <Col xs={24} sm={12}>
+                    <div style={{ marginBottom: '8px' }}>
+                      <Typography.Text strong>返回结果数量</Typography.Text>
+                    </div>
+                    <InputNumber
+                      style={{ width: '100%' }}
+                      placeholder="返回结果数量"
+                      min={1}
+                      max={20}
+                      value={topK}
+                      onChange={(value) => setTopK(value || 10)}
+                    />
                   </Col>
                 </Row>
                 
@@ -500,6 +498,7 @@ const SearchPage: FC = () => {
                       setDateRange(null);
                       setAmountMin(null);
                       setAmountMax(null);
+                      setTopK(10);
                     }}
                     style={{ marginRight: '8px' }}
                   >

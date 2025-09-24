@@ -40,13 +40,14 @@ class MetadataExtractor:
             格式化的Prompt字符串
         """
         
-        # 精简的提取字段（只保留用户要求的7个字段）
+        # 精简的提取字段（包含用户要求的8个字段）
         fields_to_extract = """
         必须提取的字段：
         - party_a: 甲方名称
         - party_b: 乙方名称
         - contract_type: 合同方向（金融方向【银行、保险、证券】、互联网方向、电信方向、其他）
         - contract_amount: 合同金额（数字，如果有多个金额取总金额）
+        - signing_date: 合同签订日期（YYYY-MM-DD格式）
         - project_description: 合同内容（项目描述或服务内容）
         - positions: 岗位信息
         - personnel_list: 相关人员清单
@@ -60,6 +61,7 @@ class MetadataExtractor:
 - party_b: 乙方名称
 - contract_type: 合同方向（金融方向【银行、保险、证券】、互联网方向、电信方向、其他）
 - contract_amount: 合同金额（数字，如果有多个金额取总金额）
+- signing_date: 合同签订日期（YYYY-MM-DD格式）
 - project_description: 合同内容（项目描述或服务内容）
 - positions: 岗位信息
 - personnel_list: 相关人员清单
@@ -69,8 +71,9 @@ class MetadataExtractor:
 2. 准确识别各个字段的信息
 3. 如果某个字段在合同中没有明确提及，请设置为null
 4. 金额请提取数字部分，不包含货币符号
-5. 返回结果必须是有效的JSON格式
-6. 只提取上述指定的7个字段，不要添加其他字段
+5. 签订日期请提取为YYYY-MM-DD格式，如2024-01-15
+6. 返回结果必须是有效的JSON格式
+7. 只提取上述指定的8个字段，不要添加其他字段
 
 合同文本：
 CONTRACT_TEXT_PLACEHOLDER
@@ -81,6 +84,7 @@ CONTRACT_TEXT_PLACEHOLDER
   "party_b": "乙方名称", 
   "contract_type": "合同方向或null",
   "contract_amount": 数字或null,
+  "signing_date": "YYYY-MM-DD或null",
   "project_description": "合同内容描述",
   "positions": "岗位信息",
   "personnel_list": "相关人员清单"
@@ -255,10 +259,10 @@ CONTRACT_TEXT_PLACEHOLDER
         Returns:
             清理后的元数据字典
         """
-        # 定义精简的字段列表（只保留用户要求的6个字段）
+        # 定义精简的字段列表（包含用户要求的8个字段）
         required_fields = [
             'party_a', 'party_b', 'contract_type', 'contract_amount',
-            'project_description', 'positions', 'personnel_list'
+            'signing_date', 'project_description', 'positions', 'personnel_list'
         ]
         
         # 创建清理后的字典
@@ -310,6 +314,8 @@ CONTRACT_TEXT_PLACEHOLDER
                 metadata_text_parts.append(f"合同方向：{metadata['contract_type']}")
             if metadata.get('contract_amount'):
                 metadata_text_parts.append(f"合同金额：{metadata['contract_amount']}元")
+            if metadata.get('signing_date'):
+                metadata_text_parts.append(f"签订日期：{metadata['signing_date']}")
             if metadata.get('project_description'):
                 metadata_text_parts.append(f"项目描述：{metadata['project_description']}")
             if metadata.get('positions'):

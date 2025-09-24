@@ -94,6 +94,9 @@ unified_mapping = {
                     "contract_amount": {
                         "type": "double"
                     },
+                    "signing_date": {
+                        "type": "date"
+                    },
                     "project_description": {
                         "type": "text"
                     },

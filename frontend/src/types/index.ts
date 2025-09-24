@@ -81,3 +81,11 @@ export interface MetadataExtractionResponse {
     raw_response?: string;
   } | null;
 }
+
+// 搜索筛选参数类型
+export interface SearchFilters {
+  amountMin?: number;
+  amountMax?: number;
+  dateStart?: string; // YYYY-MM-DD格式
+  dateEnd?: string; // YYYY-MM-DD格式
+}

@@ -40,7 +40,11 @@ class ElasticsearchVectorSearch:
             text_ngram: int = 1,
             vector_weight: float = 5.0,
             metadata_weight: float = 3.0,
-            fuzziness: str = "AUTO"
+            fuzziness: str = "AUTO",
+            amount_min: float = None,
+            amount_max: float = None,
+            date_start: str = None,
+            date_end: str = None
     ) -> List[Dict[str, Any]]:
         """
         执行搜索
@@ -60,11 +64,11 @@ class ElasticsearchVectorSearch:
             搜索结果列表
         """
         if search_mode == "content":
-            return self._search_content(query_text, top_k, text_standard, text_ngram, vector_weight, fuzziness)
+            return self._search_content(query_text, top_k, text_standard, text_ngram, vector_weight, fuzziness, amount_min, amount_max, date_start, date_end)
         elif search_mode == "metadata":
-            return self._search_metadata(query_metadata, top_k, metadata_weight, fuzziness)
+            return self._search_metadata(query_metadata, top_k, metadata_weight, fuzziness, amount_min, amount_max, date_start, date_end)
         elif search_mode == "hybrid":
-            return self._search_hybrid(query_text, query_metadata, top_k, text_standard, text_ngram, vector_weight, metadata_weight, fuzziness)
+            return self._search_hybrid(query_text, query_metadata, top_k, text_standard, text_ngram, vector_weight, metadata_weight, fuzziness, amount_min, amount_max, date_start, date_end)
         else:
             raise ValueError(f"不支持的搜索模式: {search_mode}")
     
@@ -75,7 +79,11 @@ class ElasticsearchVectorSearch:
             text_standard: int = 3,
             text_ngram: int = 1,
             vector_weight: float = 5.0,
-            fuzziness: str = "AUTO"
+            fuzziness: str = "AUTO",
+            amount_min: float = None,
+            amount_max: float = None,
+            date_start: str = None,
+            date_end: str = None
     ) -> List[Dict[str, Any]]:
         """
         内容搜索（原有逻辑）
@@ -97,20 +105,43 @@ class ElasticsearchVectorSearch:
         # 生成查询向量
         query_vector = self.model.encode(query_text).tolist()
 
+        # 构建筛选条件
+        filter_clauses = []
+        if amount_min is not None:
+            filter_clauses.append({"range": {"document_metadata.contract_amount": {"gte": amount_min}}})
+        if amount_max is not None:
+            filter_clauses.append({"range": {"document_metadata.contract_amount": {"lte": amount_max}}})
+        if date_start is not None:
+            filter_clauses.append({"range": {"document_metadata.signing_date": {"gte": date_start}}})
+        if date_end is not None:
+            filter_clauses.append({"range": {"document_metadata.signing_date": {"lte": date_end}}})
+
+        # 构建查询部分
+        query_part = {
+            "multi_match": {
+                "query": query_text,
+                "type": "best_fields",
+                "fields": text_fields,
+                "operator": "or",
+                "fuzziness": fuzziness
+            }
+        }
+
+        # 如果有筛选条件，使用bool查询包装
+        if filter_clauses:
+            query_part = {
+                "bool": {
+                    "must": [query_part],
+                    "filter": filter_clauses
+                }
+            }
+
         # 构建搜索体
         body = {
             "size": top_k,
             "query": {
                 "function_score": {
-                    "query": {
-                        "multi_match": {
-                            "query": query_text,
-                            "type": "best_fields",
-                            "fields": text_fields,
-                            "operator": "or",
-                            "fuzziness": fuzziness
-                        }
-                    },
+                    "query": query_part,
                     "boost_mode": "sum",
                     "functions": [
                         {
@@ -148,7 +179,11 @@ class ElasticsearchVectorSearch:
             query_metadata: str,
             top_k: int = 3,
             metadata_weight: float = 3.0,
-            fuzziness: str = "AUTO"
+            fuzziness: str = "AUTO",
+            amount_min: float = None,
+            amount_max: float = None,
+            date_start: str = None,
+            date_end: str = None
     ) -> List[Dict[str, Any]]:
         """
         元数据搜索
@@ -169,27 +204,48 @@ class ElasticsearchVectorSearch:
             f"document_metadata.personnel_list^{metadata_weight * 0.6}"
         ]
         
+        # 构建筛选条件
+        filter_clauses = []
+        if amount_min is not None:
+            filter_clauses.append({"range": {"document_metadata.contract_amount": {"gte": amount_min}}})
+        if amount_max is not None:
+            filter_clauses.append({"range": {"document_metadata.contract_amount": {"lte": amount_max}}})
+        if date_start is not None:
+            filter_clauses.append({"range": {"document_metadata.signing_date": {"gte": date_start}}})
+        if date_end is not None:
+            filter_clauses.append({"range": {"document_metadata.signing_date": {"lte": date_end}}})
+        
+        # 构建查询部分的must条件
+        must_clauses = [
+            {"term": {"pageId": 1}},  # 只搜索第一页（包含元数据）
+            {
+                "multi_match": {
+                    "query": query_metadata,
+                    "type": "best_fields",
+                    "fields": metadata_fields,
+                    "operator": "or",
+                    "fuzziness": fuzziness
+                }
+            }
+        ]
+        
+        # 构建查询部分
+        query_part = {
+            "bool": {
+                "must": must_clauses
+            }
+        }
+        
+        # 如果有筛选条件，添加到bool查询中
+        if filter_clauses:
+            query_part["bool"]["filter"] = filter_clauses
+        
         # 构建搜索体
         body = {
             "size": top_k,
             "query": {
                 "function_score": {
-                    "query": {
-                        "bool": {
-                            "must": [
-                                {"term": {"pageId": 1}},  # 只搜索第一页（包含元数据）
-                                {
-                                    "multi_match": {
-                                        "query": query_metadata,
-                                        "type": "best_fields",
-                                        "fields": metadata_fields,
-                                        "operator": "or",
-                                        "fuzziness": fuzziness
-                                    }
-                                }
-                            ]
-                        }
-                    },
+                    "query": query_part,
                     "boost_mode": "sum",
                     "functions": [
                         {
@@ -241,7 +297,11 @@ class ElasticsearchVectorSearch:
             text_ngram: int = 1,
             vector_weight: float = 5.0,
             metadata_weight: float = 3.0,
-            fuzziness: str = "AUTO"
+            fuzziness: str = "AUTO",
+            amount_min: float = None,
+            amount_max: float = None,
+            date_start: str = None,
+            date_end: str = None
     ) -> List[Dict[str, Any]]:
         """
         混合搜索（内容 + 元数据）
@@ -251,11 +311,11 @@ class ElasticsearchVectorSearch:
         
         # 执行内容搜索
         if query_text:
-            content_results = self._search_content(query_text, top_k * 2, text_standard, text_ngram, vector_weight, fuzziness)
+            content_results = self._search_content(query_text, top_k * 2, text_standard, text_ngram, vector_weight, fuzziness, amount_min, amount_max, date_start, date_end)
         
         # 执行元数据搜索
         if query_metadata:
-            metadata_results = self._search_metadata(query_metadata, top_k * 2, metadata_weight, fuzziness)
+            metadata_results = self._search_metadata(query_metadata, top_k * 2, metadata_weight, fuzziness, amount_min, amount_max, date_start, date_end)
         
         # 合并和重新排序结果
         return self._merge_results(content_results, metadata_results, top_k)

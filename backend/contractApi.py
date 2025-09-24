@@ -53,6 +53,25 @@ async def get_document_list():
     获取已上传的文档列表
     """
     try:
+        # 首先检查Elasticsearch连接
+        if not es_searcher.es.ping():
+            print("ERROR: Elasticsearch连接失败")
+            return {
+                "code": 500,
+                "message": "Elasticsearch连接失败",
+                "data": []
+            }
+        
+        # 检查索引是否存在
+        index_name = "contracts_unified"
+        if not es_searcher.es.indices.exists(index=index_name):
+            print(f"ERROR: 索引 {index_name} 不存在")
+            return {
+                "code": 200,
+                "message": "索引不存在，返回空列表",
+                "data": []
+            }
+        
         # 使用聚合查询获取所有文档的基本信息
         agg_query = {
             "size": 0,
@@ -66,11 +85,6 @@ async def get_document_list():
                         "page_count": {
                             "cardinality": {
                                 "field": "pageId"
-                            }
-                        },
-                        "latest_upload": {
-                            "max": {
-                                "field": "created_at"
                             }
                         },
                         "first_page": {
@@ -91,43 +105,78 @@ async def get_document_list():
             }
         }
         
+        print(f"DEBUG: 执行聚合查询: {agg_query}")
+        
         # 查询统一索引
         response = es_searcher.es.search(
-            index="contracts_unified",
+            index=index_name,
             body=agg_query
         )
+        
+        print(f"DEBUG: Elasticsearch响应: {response}")
         
         documents = []
         buckets = response.get('aggregations', {}).get('documents', {}).get('buckets', [])
         
+        print(f"DEBUG: 找到 {len(buckets)} 个文档桶")
+        
         for bucket in buckets:
-            contract_name = bucket['key']
-            page_count = bucket['page_count']['value']
-            latest_upload = bucket['latest_upload']['value_as_string']
-            
-            # 检查元数据状态
-            first_page_agg = bucket.get('first_page', {})
-            metadata_status_buckets = first_page_agg.get('metadata_status', {}).get('buckets', [])
-            
-            has_metadata = False
-            metadata_status = "not_extracted"
-            
-            if metadata_status_buckets:
-                # 获取第一个状态（通常只有一个）
-                status_bucket = metadata_status_buckets[0]
-                metadata_status = status_bucket['key']
-                has_metadata = metadata_status == "completed"
-            
-            documents.append({
-                "contract_name": contract_name,
-                "page_count": page_count,
-                "upload_time": latest_upload,
-                "has_metadata": has_metadata,
-                "metadata_status": metadata_status
-            })
+            try:
+                contract_name = bucket['key']
+                page_count = bucket['page_count']['value']
+                
+                # 从文件系统获取上传时间
+                upload_time = None
+                try:
+                    # 查找对应的PDF文件
+                    for pdf_path in UPLOAD_DIR.glob("*.pdf"):
+                        if pdf_path.stem == contract_name or pdf_path.name == contract_name:
+                            stat_info = pdf_path.stat()
+                            from datetime import datetime, timezone
+                            upload_dt = datetime.fromtimestamp(stat_info.st_mtime, tz=timezone.utc)
+                            upload_time = upload_dt.isoformat()
+                            break
+                except Exception as file_error:
+                    print(f"WARNING: 无法获取文档 {contract_name} 的文件时间: {str(file_error)}")
+                
+                # 如果无法从文件系统获取时间，使用当前时间
+                if not upload_time:
+                    from datetime import datetime
+                    upload_time = datetime.now().isoformat()
+                    print(f"WARNING: 文档 {contract_name} 使用当前时间作为上传时间")
+                
+                # 检查元数据状态
+                first_page_agg = bucket.get('first_page', {})
+                metadata_status_buckets = first_page_agg.get('metadata_status', {}).get('buckets', [])
+                
+                has_metadata = False
+                metadata_status = "not_extracted"
+                
+                if metadata_status_buckets:
+                    # 获取第一个状态（通常只有一个）
+                    status_bucket = metadata_status_buckets[0]
+                    metadata_status = status_bucket['key']
+                    has_metadata = metadata_status == "completed"
+                
+                documents.append({
+                    "contract_name": contract_name,
+                    "page_count": page_count,
+                    "upload_time": upload_time,
+                    "has_metadata": has_metadata,
+                    "metadata_status": metadata_status
+                })
+                
+            except Exception as bucket_error:
+                print(f"ERROR: 处理文档桶时出错: {str(bucket_error)}, 桶数据: {bucket}")
+                continue
         
         # 按上传时间倒序排列
-        documents.sort(key=lambda x: x['upload_time'], reverse=True)
+        try:
+            documents.sort(key=lambda x: x['upload_time'], reverse=True)
+        except Exception as sort_error:
+            print(f"WARNING: 排序失败: {str(sort_error)}, 使用原始顺序")
+        
+        print(f"DEBUG: 成功处理 {len(documents)} 个文档")
         
         return {
             "code": 200,
@@ -136,6 +185,10 @@ async def get_document_list():
         }
         
     except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"ERROR: 获取文档列表失败: {str(e)}")
+        print(f"ERROR: 详细错误信息: {error_details}")
         return {
             "code": 500,
             "message": f"获取文档列表失败: {str(e)}",
@@ -252,6 +305,11 @@ async def search_documents(
         query_content: Optional[str] = Query(default=None, description="内容搜索关键词"),
         query_metadata: Optional[str] = Query(default=None, description="元数据搜索关键词"),
         search_mode: Optional[str] = Query(default="content", description="搜索模式：content/metadata/hybrid"),
+        # 筛选参数
+        amount_min: Optional[float] = Query(default=None, description="合同金额最小值"),
+        amount_max: Optional[float] = Query(default=None, description="合同金额最大值"),
+        date_start: Optional[str] = Query(default=None, description="合同签订开始日期 (YYYY-MM-DD)"),
+        date_end: Optional[str] = Query(default=None, description="合同签订结束日期 (YYYY-MM-DD)"),
         # 其他参数保持不变
         top_k: Optional[int] = Query(default=3, description="返回结果数量"),
         text_standard: Optional[int] = Query(default=3, description="标准文本权重"),
@@ -307,6 +365,29 @@ async def search_documents(
         if fuzziness not in ("AUTO", "0", "1", "2"):
             raise HTTPException(status_code=400, detail="fuzziness 仅支持 AUTO/0/1/2")
 
+        # 验证筛选参数
+        if amount_min is not None and amount_min < 0:
+            raise HTTPException(status_code=400, detail="amount_min 必须为非负数")
+        if amount_max is not None and amount_max < 0:
+            raise HTTPException(status_code=400, detail="amount_max 必须为非负数")
+        if amount_min is not None and amount_max is not None and amount_min > amount_max:
+            raise HTTPException(status_code=400, detail="amount_min 不能大于 amount_max")
+        
+        # 验证日期格式
+        from datetime import datetime
+        if date_start is not None:
+            try:
+                datetime.strptime(date_start, "%Y-%m-%d")
+            except ValueError:
+                raise HTTPException(status_code=400, detail="date_start 格式必须为 YYYY-MM-DD")
+        if date_end is not None:
+            try:
+                datetime.strptime(date_end, "%Y-%m-%d")
+            except ValueError:
+                raise HTTPException(status_code=400, detail="date_end 格式必须为 YYYY-MM-DD")
+        if date_start is not None and date_end is not None and date_start > date_end:
+            raise HTTPException(status_code=400, detail="date_start 不能晚于 date_end")
+
         # 调用新的搜索接口
         results = await run_in_threadpool(
             es_searcher.search,
@@ -318,7 +399,11 @@ async def search_documents(
             text_ngram=tn_val,
             vector_weight=vw_val,
             metadata_weight=mw_val,
-            fuzziness=fuzziness
+            fuzziness=fuzziness,
+            amount_min=amount_min,
+            amount_max=amount_max,
+            date_start=date_start,
+            date_end=date_end
         )
 
         return {
@@ -343,6 +428,11 @@ async def search_alias(
         query_content: Optional[str] = Query(default=None, description="内容搜索关键词"),
         query_metadata: Optional[str] = Query(default=None, description="元数据搜索关键词"),
         search_mode: Optional[str] = Query(default="content", description="搜索模式：content/metadata/hybrid"),
+        # 筛选参数
+        amount_min: Optional[float] = Query(default=None, description="合同金额最小值"),
+        amount_max: Optional[float] = Query(default=None, description="合同金额最大值"),
+        date_start: Optional[str] = Query(default=None, description="合同签订开始日期 (YYYY-MM-DD)"),
+        date_end: Optional[str] = Query(default=None, description="合同签订结束日期 (YYYY-MM-DD)"),
         # 其他参数保持不变
         top_k: Optional[int] = Query(default=3, description="返回结果数量"),
         text_standard: Optional[int] = Query(default=3, description="标准文本权重"),
@@ -356,6 +446,10 @@ async def search_alias(
         query_content=query_content,
         query_metadata=query_metadata,
         search_mode=search_mode,
+        amount_min=amount_min,
+        amount_max=amount_max,
+        date_start=date_start,
+        date_end=date_end,
         top_k=top_k,
         text_standard=text_standard,
         text_ngram=text_ngram,
@@ -605,6 +699,75 @@ async def health_check():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"服务异常: {str(e)}")
+
+
+@app.get("/debug/documents")
+async def debug_documents():
+    """
+    调试用：获取所有文档的详细信息，包括text和text_vector字段
+    """
+    try:
+        # 检查Elasticsearch连接
+        if not es_searcher.es.ping():
+            return {
+                "code": 500,
+                "message": "Elasticsearch连接失败",
+                "data": []
+            }
+        
+        # 检查索引是否存在
+        index_name = "contracts_unified"
+        if not es_searcher.es.indices.exists(index=index_name):
+            return {
+                "code": 200,
+                "message": "索引不存在",
+                "data": []
+            }
+        
+        # 查询所有文档，包括text和text_vector字段
+        query = {
+            "query": {"match_all": {}},
+            "_source": ["contractName", "pageId", "text", "text_vector"],
+            "size": 50  # 限制返回数量
+        }
+        
+        response = es_searcher.es.search(
+            index=index_name,
+            body=query
+        )
+        
+        documents = []
+        hits = response.get('hits', {}).get('hits', [])
+        
+        for hit in hits:
+            source = hit.get('_source', {})
+            doc_info = {
+                "contractName": source.get('contractName'),
+                "pageId": source.get('pageId'),
+                "has_text": bool(source.get('text')),
+                "text_length": len(source.get('text', '')),
+                "has_text_vector": bool(source.get('text_vector')),
+                "text_vector_length": len(source.get('text_vector', [])),
+                "text_preview": source.get('text', '')[:200] + '...' if source.get('text') else None
+            }
+            documents.append(doc_info)
+        
+        return {
+            "code": 200,
+            "message": f"找到 {len(documents)} 个文档",
+            "data": documents
+        }
+        
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"ERROR: 调试查询失败: {str(e)}")
+        print(f"ERROR: 详细错误信息: {error_details}")
+        return {
+            "code": 500,
+            "message": f"调试查询失败: {str(e)}",
+            "data": []
+        }
 
 
 @app.post("/document/extract-metadata")

@@ -47,6 +47,9 @@ uploaded_contracts/
 *.docx
 *.doc
 
+# 部署配置（敏感信息）
+服务器部署.md
+
 # 输出文件
 output/
 temp/

@@ -1,10 +1,13 @@
 import { useState } from 'react';
 import type { FC } from 'react';
-import { Input, Button, Card, List, Slider, Space, Typography, Empty, Spin, message, Badge, Tag, Checkbox, Progress, Collapse } from 'antd';
-import { FileTextOutlined, ThunderboltOutlined, DownloadOutlined, CaretRightOutlined } from '@ant-design/icons';
+import { Input, Button, Card, List, Slider, Space, Typography, Empty, Spin, message, Badge, Tag, Checkbox, Progress, Collapse, DatePicker, InputNumber, Row, Col } from 'antd';
+import { FileTextOutlined, ThunderboltOutlined, DownloadOutlined, CaretRightOutlined, FilterOutlined } from '@ant-design/icons';
 import { searchDocuments, downloadDocument, extractMetadata } from '../services/api';
 import type { ContractSearchResult, ContractMetadata } from '../types/index';
+import type { SearchFilters } from '../services/api';
 import MetadataEditModal from '../components/MetadataEditModal';
+import dayjs from 'dayjs';
+import '../styles/compact-date-picker.css';
 
 const { Title, Text } = Typography;
 const { Search } = Input;
@@ -21,6 +24,10 @@ const SearchPage: FC = () => {
   const [metadataModalVisible, setMetadataModalVisible] = useState(false);
   const [currentMetadata, setCurrentMetadata] = useState<ContractMetadata | null>(null);
   const [currentFilename, setCurrentFilename] = useState<string>('');
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  const [dateRange, setDateRange] = useState<[dayjs.Dayjs | null, dayjs.Dayjs | null] | null>(null);
+  const [amountMin, setAmountMin] = useState<number | null>(null);
+  const [amountMax, setAmountMax] = useState<number | null>(null);
 
 
   const handleSearch = async () => {
@@ -31,7 +38,20 @@ const SearchPage: FC = () => {
 
     setLoading(true);
     try {
-      const results = await searchDocuments(searchQuery, topK);
+      // 构建筛选参数
+      const filters: SearchFilters = {};
+      if (dateRange && dateRange[0] && dateRange[1]) {
+        filters.dateStart = dateRange[0].format('YYYY-MM-DD');
+        filters.dateEnd = dateRange[1].format('YYYY-MM-DD');
+      }
+      if (amountMin !== null) {
+        filters.amountMin = amountMin;
+      }
+      if (amountMax !== null) {
+        filters.amountMax = amountMax;
+      }
+
+      const results = await searchDocuments(searchQuery, topK, filters);
       console.log('前端收到的搜索结果:', results);
       setSearchResults(results);
       if (results.length === 0) {
@@ -402,6 +422,93 @@ const SearchPage: FC = () => {
               tooltip={{ formatter: (value) => `${value} 条结果` }}
             />
           </div>
+
+          {/* 高级筛选区域 */}
+          <div style={{ marginTop: '16px' }}>
+            <Button
+              type="text"
+              icon={<FilterOutlined />}
+              onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+              style={{ 
+                padding: '4px 8px',
+                height: 'auto',
+                color: '#667eea',
+                fontSize: '14px'
+              }}
+            >
+              高级筛选 {showAdvancedFilters ? '▲' : '▼'}
+            </Button>
+            
+            {showAdvancedFilters && (
+              <div style={{
+                marginTop: '12px',
+                padding: '16px',
+                background: '#f8f9fa',
+                borderRadius: '8px',
+                border: '1px solid #e9ecef'
+              }}>
+                <Row gutter={[16, 16]}>
+                  <Col xs={24} sm={12}>
+                    <div style={{ marginBottom: '8px' }}>
+                      <Typography.Text strong>签订日期范围</Typography.Text>
+                    </div>
+                    <DatePicker.RangePicker
+                      size="small"
+                      style={{ width: '100%', fontSize: '12px' }}
+                      placeholder={['开始日期', '结束日期']}
+                      value={dateRange}
+                      onChange={setDateRange}
+                      format="YYYY-MM-DD"
+                      classNames={{ popup: { root: 'compact-date-picker' } }}
+                    />
+                  </Col>
+                  <Col xs={24} sm={12}>
+                    <div style={{ marginBottom: '8px' }}>
+                      <Typography.Text strong>合同金额范围</Typography.Text>
+                    </div>
+                    <Row gutter={8}>
+                      <Col span={12}>
+                        <InputNumber
+                          style={{ width: '100%' }}
+                          placeholder="最小金额"
+                          min={0}
+                          value={amountMin}
+                          onChange={setAmountMin}
+                          formatter={value => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
+                          parser={value => value!.replace(/\$\s?|(,*)/g, '')}
+                        />
+                      </Col>
+                      <Col span={12}>
+                        <InputNumber
+                          style={{ width: '100%' }}
+                          placeholder="最大金额"
+                          min={0}
+                          value={amountMax}
+                          onChange={setAmountMax}
+                          formatter={value => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
+                          parser={value => value!.replace(/\$\s?|(,*)/g, '')}
+                        />
+                      </Col>
+                    </Row>
+                  </Col>
+                </Row>
+                
+                <div style={{ marginTop: '12px', textAlign: 'right' }}>
+                  <Button
+                    size="small"
+                    onClick={() => {
+                      setDateRange(null);
+                      setAmountMin(null);
+                      setAmountMax(null);
+                    }}
+                    style={{ marginRight: '8px' }}
+                  >
+                    清除筛选
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </Card>
 
@@ -553,7 +660,7 @@ const SearchPage: FC = () => {
                         }}>
                           <Text strong style={{ color: '#722ed1' }}>📋 合同信息</Text>
                           {contract.metadata_score && contract.metadata_score > 0 && (
-                            <Tag color="purple" size="small">
+                            <Tag color="purple" style={{ fontSize: '12px', padding: '2px 6px' }}>
                               匹配度: {contract.metadata_score.toFixed(1)}
                             </Tag>
                           )}

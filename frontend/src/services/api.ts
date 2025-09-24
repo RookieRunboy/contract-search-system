@@ -71,17 +71,22 @@ const normalizeSearchList = (rawList: unknown): ContractSearchResult[] => {
 
   const firstItem = rawList[0] as RawSearchChunk | undefined;
 
+  // 处理后端返回的新格式：每个合同包含chunks数组和元数据信息
   if (firstItem && Array.isArray((firstItem as any).chunks)) {
     return rawList.map((item) => {
       const contractItem = item as RawSearchChunk & { 
         chunks: RawSearchChunk[]; 
         metadata_info?: any;
         metadata_score?: number;
+        content_pages?: any[];
+        combined_score?: number;
+        content_score?: number;
+        highlights?: Record<string, any>;
       };
       const contractName = toStringValue(contractItem.contract_name) ?? toStringValue(contractItem.contractName);
       return {
         contract_name: contractName ?? '未知合同',
-        score: toNumber(contractItem.score),
+        score: toNumber(contractItem.combined_score ?? contractItem.score),
         metadata_info: contractItem.metadata_info,
         metadata_score: toNumber(contractItem.metadata_score),
         chunks: Array.isArray(contractItem.chunks)
@@ -92,7 +97,15 @@ const normalizeSearchList = (rawList: unknown): ContractSearchResult[] => {
             highlights: (chunk.highlights && typeof chunk.highlights === 'object') ? (chunk.highlights as Record<string, any>) : {},
             metadata_highlights: (chunk as any).metadata_highlights,
             })) as DocumentChunk[]
-          : [],
+          : Array.isArray(contractItem.content_pages)
+            ? contractItem.content_pages.map((page) => ({
+              score: toNumber(page.score),
+              page_id: toNumber(page.page_id),
+              text: toStringValue(page.text) ?? '',
+              highlights: {},
+              metadata_highlights: undefined,
+            })) as DocumentChunk[]
+            : [],
       };
     });
   }
@@ -141,10 +154,38 @@ const normalizeSearchList = (rawList: unknown): ContractSearchResult[] => {
   return Array.from(grouped.values()).sort((a, b) => b.score - a.score);
 };
 
-export const searchDocuments = async (query: string, topK: number = 5): Promise<ContractSearchResult[]> => {
+export interface SearchFilters {
+  amountMin?: number;
+  amountMax?: number;
+  dateStart?: string;
+  dateEnd?: string;
+}
+
+export const searchDocuments = async (
+  query: string, 
+  topK: number = 5, 
+  filters?: SearchFilters
+): Promise<ContractSearchResult[]> => {
+  // 构建查询参数
+  const params: any = { query, top_k: topK };
+  
+  // 添加筛选参数
+  if (filters?.amountMin !== undefined) {
+    params.amount_min = filters.amountMin;
+  }
+  if (filters?.amountMax !== undefined) {
+    params.amount_max = filters.amountMax;
+  }
+  if (filters?.dateStart) {
+    params.date_start = filters.dateStart;
+  }
+  if (filters?.dateEnd) {
+    params.date_end = filters.dateEnd;
+  }
+
   // 改为 GET，并通过 query 参数传递
   const response = await api.get('/document/search', {
-    params: { query, top_k: topK }
+    params
   });
 
   // 兼容不同后端返回结构：

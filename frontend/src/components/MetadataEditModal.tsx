@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Modal, Form, Input, Select, InputNumber, Button, message, Spin } from 'antd';
+import { Modal, Form, Input, Select, InputNumber, Button, message, Spin, DatePicker } from 'antd';
 import { ExperimentOutlined } from '@ant-design/icons';
 import type { ContractMetadata } from '../types/index';
 import { saveMetadata, extractMetadata } from '../services/api';
+import dayjs from 'dayjs';
 
 const { TextArea } = Input;
 const { Option } = Select;
@@ -71,6 +72,7 @@ const MetadataEditModal: React.FC<MetadataEditModalProps> = ({
       party_b: metadata?.party_b ?? '',
       contract_type: metadata?.contract_type ?? undefined,
       contract_amount: metadata?.contract_amount ?? null,
+      signing_date: metadata?.signing_date ? dayjs(metadata.signing_date) : null,
       project_description: metadata?.project_description ?? '',
       positions: metadata?.positions ?? '',
       personnel_list: metadata?.personnel_list ?? '',
@@ -106,6 +108,7 @@ const MetadataEditModal: React.FC<MetadataEditModalProps> = ({
         party_b: normalizeTextValue(values.party_b),
         contract_type: values.contract_type ?? null,
         contract_amount: normalizeAmountValue(values.contract_amount),
+        signing_date: values.signing_date ? (values.signing_date as any).format('YYYY-MM-DD') : null,
         project_description: normalizeTextValue(values.project_description),
         positions: normalizeTextValue(values.positions),
         personnel_list: normalizeTextValue(values.personnel_list),
@@ -136,12 +139,16 @@ const MetadataEditModal: React.FC<MetadataEditModalProps> = ({
       const response = await extractMetadata(filename);
       
       if (response.code === 200 && response.data?.metadata) {
+        const metadataSource = response.data.metadata as Record<string, unknown>;
+        const rawSigningDate = metadataSource['signing_date'] ?? metadataSource['signingDate'];
+
         const metadata: ContractMetadata = {
           contract_name: filename,
           party_a: normalizeTextValue(response.data.metadata.party_a),
           party_b: normalizeTextValue(response.data.metadata.party_b),
           contract_type: response.data.metadata.contract_type ?? null,
           contract_amount: normalizeAmountValue(response.data.metadata.contract_amount),
+          signing_date: normalizeTextValue(rawSigningDate),
           project_description: normalizeTextValue(response.data.metadata.project_description),
           positions: normalizeTextValue(response.data.metadata.positions),
           personnel_list: normalizeTextValue(response.data.metadata.personnel_list),
@@ -233,6 +240,15 @@ const MetadataEditModal: React.FC<MetadataEditModalProps> = ({
                 style={{ width: '100%' }}
                 formatter={(value) => `¥ ${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
                 parser={(value) => value!.replace(/¥\s?|(,*)/g, '')}
+              />
+            </Form.Item>
+
+            <Form.Item label="签订日期" name="signing_date">
+              <DatePicker
+                size="small"
+                style={{ width: '100%' }}
+                placeholder="请选择签订日期"
+                format="YYYY-MM-DD"
               />
             </Form.Item>
 

@@ -22,9 +22,13 @@ export interface SystemStatus {
 }
 
 // 文档上传
-export const uploadDocument = async (file: File): Promise<any> => {
+export const uploadDocument = async (files: File | File[]): Promise<any> => {
   const formData = new FormData();
-  formData.append('file', file);
+  const fileList = Array.isArray(files) ? files : [files];
+
+  fileList.forEach((file) => {
+    formData.append('files', file);
+  });
   
   return api.post('/document/add', formData, {
     headers: {

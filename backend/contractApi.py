@@ -256,35 +256,81 @@ async def root():
 
 
 @app.post("/document/add")
-async def upload_document(file: UploadFile = File(...)):
+async def upload_document(
+    files: List[UploadFile] = File(..., description="上传的PDF合同文件，支持一次选择多个")
+):
     """
     上传PDF文档并索引到Elasticsearch
     """
-    try:
-        result= await run_in_threadpool(pdf_to_es.start_process, file)
-        return {
-            "code": 200,
-            "message": "文档上传成功",
-            "data": result
+    if not files:
+        raise HTTPException(status_code=400, detail="请至少上传一个文件")
+
+    success_results: List[dict[str, str | int | None]] = []
+    failed_results: List[dict[str, str | int]] = []
+
+    for upload in files:
+        filename = upload.filename or "unknown"
+
+        try:
+            # 确保游标位于文件开头
+            try:
+                upload.file.seek(0)
+            except Exception:
+                pass
+
+            result = await run_in_threadpool(pdf_to_es.start_process, upload)
+            success_results.append(result)
+        except HTTPException as e:
+            failed_results.append({
+                "status": "failed",
+                "pdf_name": filename,
+                "error": e.detail,
+                "code": e.status_code,
+            })
+        except Exception as e:
+            failed_results.append({
+                "status": "failed",
+                "pdf_name": filename,
+                "error": str(e),
+                "code": 500,
+            })
+        finally:
+            # 关闭临时文件，释放资源
+            try:
+                await upload.close()
+            except Exception:
+                pass
+
+    if not success_results and failed_results:
+        # 若全部失败，则直接抛出异常，便于前端统一处理
+        first_error = failed_results[0]
+        raise HTTPException(
+            status_code=first_error.get("code", 500),
+            detail=first_error.get("error", "文档上传失败"),
+        )
+
+    message_parts = []
+    if success_results:
+        message_parts.append(f"成功上传 {len(success_results)} 个文件")
+    if failed_results:
+        message_parts.append(f"失败 {len(failed_results)} 个文件")
+
+    return {
+        "code": 200,
+        "message": "，".join(message_parts) if message_parts else "文档上传完成",
+        "data": {
+            "success": success_results,
+            "failed": failed_results,
         }
-    except HTTPException as e:
-        return {
-            "code": e.status_code,
-            "message": e.detail,
-            "data": None
-        }
-    except Exception as e:
-        return {
-            "code": 500,
-            "message": f"文档上传失败: {str(e)}",
-            "data": None
-        }
+    }
 
 
 # 兼容别名：POST /upload -> /document/add
 @app.post("/upload")
-async def upload_alias(file: UploadFile = File(...)):
-    return await upload_document(file)
+async def upload_alias(
+    files: List[UploadFile] = File(..., description="上传的PDF合同文件，支持一次选择多个")
+):
+    return await upload_document(files)
 
 
 @app.delete("/document/delete")
@@ -902,6 +948,7 @@ async def save_metadata(request: dict):
             "party_b": metadata.get('party_b'),
             "contract_type": metadata.get('contract_type'),
             "contract_amount": metadata.get('contract_amount'),
+            "signing_date": metadata.get('signing_date'),
             "project_description": metadata.get('project_description'),
             "positions": metadata.get('positions'),
             "personnel_list": metadata.get('personnel_list'),

@@ -151,6 +151,10 @@ const normalizeContractMetadata = (raw: Record<string, unknown> | null | undefin
   const partyBRaw = raw?.['party_b'] ?? raw?.['partyB'];
   const positionsRaw = raw?.['positions'] ?? raw?.['position'];
   const personnelRaw = raw?.['personnel_list'] ?? raw?.['personnelList'];
+  const signingDateRaw = sanitizeTextValue(raw?.['signing_date'])
+    ?? sanitizeTextValue(raw?.['signingDate'])
+    ?? sanitizeTextValue(raw?.['sign_date'])
+    ?? sanitizeTextValue(raw?.['signDate']);
   const extractedAtRaw = raw?.['extracted_at'] ?? raw?.['extractedAt'];
 
   return {
@@ -159,6 +163,7 @@ const normalizeContractMetadata = (raw: Record<string, unknown> | null | undefin
     party_b: sanitizeTextValue(partyBRaw),
     contract_type: contractTypeRaw,
     contract_amount: parseContractAmount(contractAmountRaw),
+    signing_date: signingDateRaw,
     project_description: projectDescription,
     positions: sanitizeTextValue(positionsRaw),
     personnel_list: sanitizeTextValue(personnelRaw),
@@ -200,6 +205,17 @@ const formatDateTimeDisplay = (value?: string | null): string => {
     return value;
   }
   return parsed.toLocaleString();
+};
+
+const formatDateDisplay = (value?: string | null): string => {
+  if (!value) {
+    return '-';
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+  return parsed.toLocaleDateString();
 };
 
 interface DocumentDetail {
@@ -400,9 +416,10 @@ const UploadPage: FC = () => {
 
   // 上传配置
   const uploadProps = {
-    name: 'file',
+    name: 'files',
     action: `${API_BASE_URL}/document/add`,
     accept: '.pdf',
+    multiple: true,
     showUploadList: false,
     beforeUpload: (file: File) => {
       const isPDF = file.type === 'application/pdf';
@@ -419,15 +436,27 @@ const UploadPage: FC = () => {
     },
     onChange: (info: UploadChangeParam<UploadFile<unknown>>) => {
       const { status } = info.file;
+
       if (status === 'uploading') {
         setUploading(true);
-      } else if (status === 'done') {
-        setUploading(false);
+        return;
+      }
+
+      if (status === 'done') {
+        const hasUploading = info.fileList.some((item) => item.status === 'uploading');
         message.success(`${info.file.name} 上传成功`);
-        fetchDocuments();
-      } else if (status === 'error') {
-        setUploading(false);
+        setUploading(hasUploading);
+
+        if (!hasUploading) {
+          fetchDocuments();
+        }
+        return;
+      }
+
+      if (status === 'error') {
+        const hasUploading = info.fileList.some((item) => item.status === 'uploading');
         message.error(`${info.file.name} 上传失败`);
+        setUploading(hasUploading);
       }
     },
   };
@@ -616,6 +645,7 @@ const UploadPage: FC = () => {
                   <Descriptions.Item label="乙方">{detailMetadata.party_b ?? '-'}</Descriptions.Item>
                   <Descriptions.Item label="合同方向">{formatContractTypeLabel(detailMetadata.contract_type)}</Descriptions.Item>
                   <Descriptions.Item label="合同金额">{formatAmountDisplay(detailMetadata.contract_amount)}</Descriptions.Item>
+                  <Descriptions.Item label="签订日期">{formatDateDisplay(detailMetadata.signing_date)}</Descriptions.Item>
                   <Descriptions.Item label="岗位信息" span={2}>{detailMetadata.positions ?? '-'}</Descriptions.Item>
                   <Descriptions.Item label="人员清单" span={2}>{detailMetadata.personnel_list ?? '-'}</Descriptions.Item>
                   <Descriptions.Item label="合同内容" span={2}>
@@ -664,7 +694,7 @@ const UploadPage: FC = () => {
           </p>
           <p className="ant-upload-text">点击或拖拽文件到此区域上传</p>
           <p className="ant-upload-hint">
-            支持PDF格式，文件大小不超过50MB。上传后将自动进行LLM结构化提取。
+            支持选择多个PDF文件，单个文件大小不超过50MB。上传后将自动进行LLM结构化提取。
           </p>
         </Dragger>
         {uploading && <Progress percent={50} status="active" />}

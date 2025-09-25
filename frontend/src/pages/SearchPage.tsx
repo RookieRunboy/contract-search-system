@@ -26,6 +26,8 @@ const SearchPage: FC = () => {
   const [currentFilename, setCurrentFilename] = useState<string>('');
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [dateRange, setDateRange] = useState<[dayjs.Dayjs | null, dayjs.Dayjs | null] | null>(null);
+  // 控制日期范围弹窗开合，便于在选择完成后自动关闭
+  const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [amountMin, setAmountMin] = useState<number | null>(null);
   const [amountMax, setAmountMax] = useState<number | null>(null);
 
@@ -440,11 +442,20 @@ const SearchPage: FC = () => {
                     <DatePicker.RangePicker
                       size="small"
                       style={{ width: '100%', fontSize: '12px' }}
-                      placeholder={['开始日期', '结束日期']}
+                      placeholder={["开始日期", "结束日期"]}
                       value={dateRange}
-                      onChange={setDateRange}
+                      onChange={(range) => {
+                        setDateRange(range);
+                        // 当起止日期都已选择时，自动关闭弹窗
+                        if (range && range[0] && range[1]) {
+                          setDatePickerOpen(false);
+                        }
+                      }}
+                      onOpenChange={(open) => setDatePickerOpen(open)}
+                      open={datePickerOpen}
                       format="YYYY-MM-DD"
                       classNames={{ popup: { root: 'compact-date-picker' } }}
+                      allowClear
                     />
                   </Col>
                   <Col xs={24} sm={12}>

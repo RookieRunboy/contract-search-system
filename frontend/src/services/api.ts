@@ -206,9 +206,13 @@ export const searchDocuments = async (
 };
 
 // 文档上传接口
-export const uploadDocument = async (file: File, onProgress?: (progress: number) => void): Promise<any> => {
+export const uploadDocument = async (files: File | File[], onProgress?: (progress: number) => void): Promise<any> => {
   const formData = new FormData();
-  formData.append('file', file);
+  const fileList = Array.isArray(files) ? files : [files];
+
+  fileList.forEach((file) => {
+    formData.append('files', file);
+  });
 
   try {
     const result = await api.post('/upload', formData, {

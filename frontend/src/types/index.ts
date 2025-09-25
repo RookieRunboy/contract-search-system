@@ -64,6 +64,7 @@ export interface ContractMetadata {
   party_b: string | null; // 乙方
   contract_type: string | null; // 合同方向
   contract_amount: number | null; // 合同金额
+  signing_date?: string | null; // 签订日期，YYYY-MM-DD
   project_description: string | null; // 项目描述
   positions: string | null; // 岗位
   personnel_list: string | null; // 人员清单

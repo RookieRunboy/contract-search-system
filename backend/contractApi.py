@@ -92,10 +92,18 @@ async def get_document_list():
                                 "term": {"pageId": 1}
                             },
                             "aggs": {
-                                "metadata_status": {
-                                    "terms": {
-                                        "field": "document_metadata.extraction_status.keyword",
-                                        "missing": "not_extracted"
+                                "first_doc": {
+                                    "top_hits": {
+                                        "size": 1,
+                                        "sort": [
+                                            {"updated_at": {"order": "desc"}}
+                                        ],
+                                        "_source": {
+                                            "includes": [
+                                                "document_metadata",
+                                                "updated_at"
+                                            ]
+                                        }
                                     }
                                 }
                             }
@@ -147,16 +155,25 @@ async def get_document_list():
                 
                 # 检查元数据状态
                 first_page_agg = bucket.get('first_page', {})
-                metadata_status_buckets = first_page_agg.get('metadata_status', {}).get('buckets', [])
-                
+                first_doc_hits = first_page_agg.get('first_doc', {}).get('hits', {}).get('hits', [])
+                raw_metadata = None
+                if first_doc_hits:
+                    raw_source = first_doc_hits[0].get('_source', {}) or {}
+                    raw_metadata = raw_source.get('document_metadata')
+
+                # 判断元数据是否“已提取”：关键字段是否至少有一个非空
+                def _is_non_empty(v):
+                    return v is not None and v != "" and v != [] and v != {}
+
                 has_metadata = False
-                metadata_status = "not_extracted"
-                
-                if metadata_status_buckets:
-                    # 获取第一个状态（通常只有一个）
-                    status_bucket = metadata_status_buckets[0]
-                    metadata_status = status_bucket['key']
-                    has_metadata = metadata_status == "completed"
+                if isinstance(raw_metadata, dict) and raw_metadata:
+                    key_fields = [
+                        'party_a', 'party_b', 'contract_type', 'contract_amount',
+                        'project_description', 'positions', 'personnel_list'
+                    ]
+                    has_metadata = any(_is_non_empty(raw_metadata.get(k)) for k in key_fields)
+
+                metadata_status = 'extracted' if has_metadata else 'not_extracted'
                 
                 documents.append({
                     "contract_name": contract_name,
@@ -177,7 +194,7 @@ async def get_document_list():
             print(f"WARNING: 排序失败: {str(sort_error)}, 使用原始顺序")
         
         print(f"DEBUG: 成功处理 {len(documents)} 个文档")
-        
+
         return {
             "code": 200,
             "message": "获取文档列表成功",
@@ -555,7 +572,6 @@ async def get_document_detail(document_name: str):
                 raw_metadata = source.get("document_metadata")
                 if isinstance(raw_metadata, dict) and raw_metadata:
                     document_metadata = raw_metadata
-                    metadata_status = raw_metadata.get("extraction_status") or metadata_status
 
         file_path = None
         if UPLOAD_DIR.exists():
@@ -577,6 +593,20 @@ async def get_document_detail(document_name: str):
             file_size = _format_file_size(stat_info.st_size)
             contract_display_name = file_path.name
 
+        # 判断是否“已提取”：关键字段至少有一个非空
+        def _is_non_empty(v):
+            return v is not None and v != "" and v != [] and v != {}
+
+        has_metadata_flag = False
+        if isinstance(document_metadata, dict) and document_metadata:
+            key_fields = [
+                'party_a', 'party_b', 'contract_type', 'contract_amount',
+                'project_description', 'positions', 'personnel_list'
+            ]
+            has_metadata_flag = any(_is_non_empty(document_metadata.get(k)) for k in key_fields)
+
+        metadata_status = 'extracted' if has_metadata_flag else 'not_extracted'
+
         detail = {
             "contract_name": contract_display_name,
             "contractName": contract_display_name,
@@ -586,15 +616,13 @@ async def get_document_detail(document_name: str):
             "totalPages": len(pages),
             "total_chars": total_chars,
             "totalChars": total_chars,
-            "extractionStatus": "已提取" if metadata_status == "completed" else (
-                "提取中" if metadata_status in {"processing", "in_progress", "pending"} else "未提取"
-            ),
+            "extractionStatus": "已提取" if has_metadata_flag else "未提取",
             "structured_data": document_metadata,
             "structuredData": document_metadata,
             "document_metadata": document_metadata,
             "metadata_status": metadata_status,
             "metadataStatus": metadata_status,
-            "has_metadata": bool(document_metadata and metadata_status == "completed"),
+            "has_metadata": has_metadata_flag,
             "pages": pages,
             "upload_time": upload_iso,
             "uploadTime": upload_display,
@@ -877,8 +905,7 @@ async def save_metadata(request: dict):
             "project_description": metadata.get('project_description'),
             "positions": metadata.get('positions'),
             "personnel_list": metadata.get('personnel_list'),
-            "extracted_at": now_iso,
-            "extraction_status": "completed"
+            "extracted_at": now_iso
         }
         
         # 更新文档的document_metadata字段

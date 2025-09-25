@@ -109,9 +109,6 @@ unified_mapping = {
                     "extracted_at": {
                         "type": "date"
                     },
-                    "extraction_status": {
-                        "type": "keyword"  # pending, completed, failed
-                    },
                     "metadata_vector": {
                         "type": "dense_vector",
                         "dims": 768,
@@ -174,8 +171,7 @@ example_doc_page1 = {
         "project_description": "系统开发项目",
         "positions": "技术经理、开发工程师",
         "personnel_list": "张三、李四",
-        "extracted_at": datetime.now().isoformat(),
-        "extraction_status": "completed"
+        "extracted_at": datetime.now().isoformat()
     },
     "created_at": datetime.now().isoformat(),
     "updated_at": datetime.now().isoformat(),

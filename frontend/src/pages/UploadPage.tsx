@@ -366,15 +366,25 @@ const UploadPage: FC = () => {
   const handleViewMetadata = async (contractKey: string) => {
     try {
       const fileName = `${contractKey}.pdf`;
+      
+      // 找到对应的文档记录，获取准确的文件名信息
+      const documentRecord = documents.find(d => d.contractKey === contractKey);
+      const actualFileName = documentRecord?.fileName || fileName;
 
       // 先尝试获取文档详情，看是否已有元数据
       const detailResponse = await getDocumentDetail(contractKey);
       const detail = detailResponse?.data ?? detailResponse;
       const rawMetadata = detail?.document_metadata ?? detail?.structuredData ?? detail?.structured_data;
       const metadataObject = (rawMetadata && typeof rawMetadata === 'object') ? rawMetadata as Record<string, unknown> : null;
-      const normalizedMetadata = normalizeContractMetadata(metadataObject, fileName);
+      const normalizedMetadata = normalizeContractMetadata(metadataObject, actualFileName);
+      
+      // 确保元数据包含正确的contractKey信息，用于onSaved回调匹配
+      if (normalizedMetadata) {
+        normalizedMetadata.contractKey = contractKey;
+        normalizedMetadata.fileName = actualFileName;
+      }
+      
       setCurrentMetadata(normalizedMetadata);
-
       setMetadataModalVisible(true);
     } catch (error) {
       console.error('获取元数据失败:', error);
@@ -440,21 +450,11 @@ const UploadPage: FC = () => {
     );
   };
 
-  // 元数据提取状态标签
-  const renderMetadataStatus = (extracted: boolean, status?: string) => {
+  // 元数据提取状态标签（仅两种状态：未提取/已提取）
+  const renderMetadataStatus = (extracted: boolean, _status?: string) => {
     if (extracted) {
       return <Tag color="green" icon={<CheckCircleOutlined />}>已提取</Tag>;
     }
-
-    const normalized = status?.toLowerCase();
-    if (normalized && ['processing', 'in_progress', 'pending'].includes(normalized)) {
-      return <Tag color="blue" icon={<ClockCircleOutlined />}>提取中</Tag>;
-    }
-
-    if (normalized && ['failed', 'error'].includes(normalized)) {
-      return <Tag color="red" icon={<ExclamationCircleOutlined />}>提取失败</Tag>;
-    }
-
     return <Tag color="orange" icon={<ClockCircleOutlined />}>未提取</Tag>;
   };
 
@@ -709,9 +709,32 @@ const UploadPage: FC = () => {
         onCancel={handleCloseMetadataModal}
         onSaved={(m) => {
           // 立即更新对应行的提取状态，避免按钮不消失
-          if (m?.contract_name) {
-            const key = m.contract_name.replace(/\.pdf$/i, '');
-            setDocuments((prev) => prev.map((d) => d.contractKey === key ? { ...d, metadataExtracted: true, metadataStatus: 'completed' } : d));
+          if (m) {
+            setDocuments((prev) => prev.map((d) => {
+              // 优先使用contractKey进行精确匹配
+              if (m.contractKey && d.contractKey === m.contractKey) {
+                return { ...d, metadataExtracted: true, metadataStatus: 'completed' };
+              }
+              
+              // 备用匹配方式：通过文件名匹配
+              if (m.fileName && (d.fileName === m.fileName || d.contractKey === m.fileName.replace(/\.pdf$/i, ''))) {
+                return { ...d, metadataExtracted: true, metadataStatus: 'completed' };
+              }
+              
+              // 最后尝试通过contract_name匹配
+              if (m.contract_name) {
+                const isMatch = 
+                  d.fileName === m.contract_name ||
+                  d.name === m.contract_name ||
+                  d.contractKey === m.contract_name.replace(/\.pdf$/i, '');
+                
+                if (isMatch) {
+                  return { ...d, metadataExtracted: true, metadataStatus: 'completed' };
+                }
+              }
+              
+              return d;
+            }));
           }
           // 再拉一次后端，确保状态一致
           fetchDocuments();

@@ -196,10 +196,13 @@ start_backend() {
         log_info "已激活虚拟环境 contract_env"
     fi
     
+    # 确保日志目录存在
+    mkdir -p "$PROJECT_ROOT/logs"
+    
     # 后台启动后端服务
-    nohup python contractApi.py > ../logs/backend.log 2>&1 &
+    nohup python contractApi.py > "$PROJECT_ROOT/logs/backend.log" 2>&1 &
     BACKEND_PID=$!
-    echo $BACKEND_PID > ../logs/backend.pid
+    echo $BACKEND_PID > "$PROJECT_ROOT/logs/backend.pid"
     
     # 等待后端启动
     wait_for_service "http://localhost:8006/health" "后端服务"
@@ -212,10 +215,13 @@ build_frontend() {
 
     cd "$FRONTEND_DIR"
 
+    # 确保日志目录存在
+    mkdir -p "$PROJECT_ROOT/logs"
+
     if check_command npm; then
-        npm run build > ../logs/frontend.log 2>&1
+        npm run build > "$PROJECT_ROOT/logs/frontend.log" 2>&1
     elif check_command yarn; then
-        yarn build > ../logs/frontend.log 2>&1
+        yarn build > "$PROJECT_ROOT/logs/frontend.log" 2>&1
     else
         log_error "请先安装 npm 或 yarn"
         exit 1
@@ -224,7 +230,7 @@ build_frontend() {
     if [ $? -eq 0 ]; then
         log_success "前端静态资源构建完成 (访问地址: http://localhost:8006)"
     else
-        log_error "前端构建失败，请查看 logs/frontend.log"
+        log_error "前端构建失败，请查看 $PROJECT_ROOT/logs/frontend.log"
         exit 1
     fi
 }

@@ -101,10 +101,6 @@ unified_mapping = {
                     },
                     "extracted_at": {
                         "type": "date"
-                    },
-                    "extraction_status": {
-                        "type": "keyword",  # pending, completed, failed
-                        "value": "pending"
                     }
                 }
             },
@@ -159,8 +155,7 @@ example_doc_page1 = {
         "project_description": "系统开发项目",
         "positions": "技术经理、开发工程师",
         "personnel_list": "张三、李四",
-        "extracted_at": "2024-01-15T10:00:00",
-        "extraction_status": "completed"
+        "extracted_at": "2024-01-15T10:00:00"
     },
     "created_at": "2024-01-15T09:00:00",
     "updated_at": "2024-01-15T10:00:00",

@@ -68,6 +68,8 @@ export interface ContractMetadata {
   positions: string | null; // 岗位
   personnel_list: string | null; // 人员清单
   extracted_at: string; // 提取时间
+  contractKey?: string; // 合同键值，用于状态更新匹配
+  fileName?: string; // 文件名，用于状态更新匹配
 }
 
 // 元数据提取响应类型

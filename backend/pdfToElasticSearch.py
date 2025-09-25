@@ -84,8 +84,7 @@ class JSONToElasticsearch:
                         "project_description": None,
                         "positions": None,
                         "personnel_list": None,
-                        "extracted_at": None,
-                        "extraction_status": "pending"
+                        "extracted_at": None
                     },
                     "total_pages": total_pages,
                     "file_size": file_size
@@ -129,8 +128,7 @@ class JSONToElasticsearch:
                     "project_description": metadata.get('project_description'),
                     "positions": metadata.get('positions'),
                     "personnel_list": metadata.get('personnel_list'),
-                    "extracted_at": metadata.get('extracted_at'),
-                    "extraction_status": "completed"
+                    "extracted_at": metadata.get('extracted_at')
                 }
             }
             
@@ -146,7 +144,7 @@ class JSONToElasticsearch:
                 "query": {
                     "bool": {
                         "must": [
-                            {"term": {"contractName.keyword": contract_name}},
+                            {"term": {"contractName": contract_name}},
                             {"term": {"pageId": 1}}
                         ]
                     }
@@ -162,10 +160,11 @@ class JSONToElasticsearch:
             # 更新第一页文档的元数据
             doc_id = search_result['hits']['hits'][0]['_id']
             
+            from datetime import datetime
             self.es.update(
                 index=self.index_name,
                 id=doc_id,
-                body={"doc": update_data}
+                body={"doc": {**update_data, "updated_at": datetime.now().isoformat()}}
             )
             
             print(f"成功更新合同 {contract_name} 的元数据")

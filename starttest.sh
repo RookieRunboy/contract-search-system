@@ -147,19 +147,21 @@ start_elasticsearch() {
 
 # 创建索引
 create_index() {
-    log_info "检查 contracts_vector 索引..."
-    if curl -s -f "http://localhost:9200/contracts_vector" >/dev/null 2>&1; then
-        log_success "索引 contracts_vector 已存在"
+    local unified_index="contracts_unified"
+
+    log_info "检查 $unified_index 索引..."
+    if curl -s -f "http://localhost:9200/${unified_index}" >/dev/null 2>&1; then
+        log_success "索引 ${unified_index} 已存在"
         return 0
     fi
 
-    log_info "创建 Elasticsearch 索引..."
+    log_info "创建 Elasticsearch 索引 (${unified_index})..."
     if [ -d "$VENV_DIR" ]; then
         source "$VENV_DIR/bin/activate"
     fi
     cd "$BACKEND_DIR"
-    python elasticSearchSettingVector.py > "$LOG_DIR/es-index.log" 2>&1 && \
-        log_success "索引创建完成" || {
+    python create_unified_index.py > "$LOG_DIR/es-index.log" 2>&1 && \
+        log_success "${unified_index} 索引创建完成" || {
             log_error "索引创建失败，详见 $LOG_DIR/es-index.log"
             exit 1
         }

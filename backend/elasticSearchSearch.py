@@ -169,7 +169,8 @@ class ElasticsearchVectorSearch:
         # 执行搜索
         try:
             results = self.es.search(index=self.index_name, body=body)
-            return self._process_results(results)
+            processed_results = self._process_results(results)
+            return self._attach_metadata_info(processed_results)
         except Exception as e:
             print(f"搜索错误: {str(e)}")
             return []
@@ -283,7 +284,8 @@ class ElasticsearchVectorSearch:
         # 执行搜索
         try:
             results = self.es.search(index=self.index_name, body=body)
-            return self._process_metadata_results(results)
+            processed_results = self._process_metadata_results(results)
+            return self._attach_metadata_info(processed_results)
         except Exception as e:
             print(f"元数据搜索错误: {str(e)}")
             return []
@@ -379,7 +381,8 @@ class ElasticsearchVectorSearch:
             reverse=True
         )
         
-        return sorted_results[:top_k]
+        enriched_results = sorted_results[:top_k]
+        return self._attach_metadata_info(enriched_results)
     
     def _process_metadata_results(self, results: Dict[str, Any]) -> List[Dict[str, Any]]:
         """
@@ -453,6 +456,105 @@ class ElasticsearchVectorSearch:
             }
             processed_results.append(result)
         return processed_results
+
+    def _attach_metadata_info(self, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """为搜索结果补充合同元数据信息"""
+        if not results:
+            return results
+
+        contract_names = {
+            result.get('contract_name')
+            for result in results
+            if isinstance(result, dict) and result.get('contract_name')
+        }
+
+        if not contract_names:
+            return results
+
+        metadata_map = self._fetch_contract_metadata(contract_names)
+
+        for result in results:
+            name = result.get('contract_name')
+            if not name:
+                continue
+            metadata = metadata_map.get(name)
+            if not metadata:
+                continue
+
+            # 仅在缺失时写入，避免覆盖已有信息
+            if not result.get('metadata_info') and isinstance(metadata, dict):
+                result['metadata_info'] = dict(metadata)
+                metadata_info = result['metadata_info']
+            elif isinstance(result.get('metadata_info'), dict):
+                merged = dict(metadata)
+                merged.update(result['metadata_info'])
+                result['metadata_info'] = merged
+                metadata_info = merged
+            else:
+                metadata_info = metadata if isinstance(metadata, dict) else {}
+
+            contract_amount = metadata_info.get('contract_amount')
+            signing_date = metadata_info.get('signing_date')
+
+            if contract_amount is not None:
+                if isinstance(contract_amount, (int, float)):
+                    result['contract_amount'] = float(contract_amount)
+                else:
+                    try:
+                        result['contract_amount'] = float(str(contract_amount).replace(',', ''))
+                    except (TypeError, ValueError):
+                        result['contract_amount'] = contract_amount
+
+            if signing_date:
+                result['signing_date'] = signing_date
+
+        return results
+
+    def _fetch_contract_metadata(self, contract_names: set) -> Dict[str, Dict[str, Any]]:
+        """
+        批量获取合同的元数据（主要用于获取签订时间和金额）
+        """
+        metadata_map: Dict[str, Dict[str, Any]] = {}
+
+        for name in contract_names:
+            try:
+                query = {
+                    "size": 1,
+                    "_source": ["document_metadata"],
+                    "query": {
+                        "bool": {
+                            "must": [
+                                {
+                                    "match_phrase": {
+                                        "contractName": name
+                                    }
+                                }
+                            ],
+                            "filter": [
+                                {
+                                    "term": {
+                                        "pageId": 1
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+
+                response = self.es.search(index=self.index_name, body=query)
+                hits = response.get('hits', {}).get('hits', [])
+                if not hits:
+                    continue
+
+                source = hits[0].get('_source', {})
+                metadata = source.get('document_metadata')
+                if isinstance(metadata, dict) and metadata:
+                    metadata_map[name] = metadata
+            except Exception as e:
+                print(f"获取合同 {name} 的元数据失败: {str(e)}")
+                continue
+
+        return metadata_map
 
 
 if __name__ == "__main__":

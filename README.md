@@ -20,6 +20,9 @@
 - **Ant Design**: 一套优秀的企业级UI设计语言和React组件库。
 - **Vite**: 新一代的前端构建工具，提供极速的开发体验。
 - **axios**: 用于处理与后端API的HTTP通信。
+- **react-router-dom**: 为React应用提供路由功能。
+- **react-highlight-words**: 用于在文本中高亮显示关键字。
+- **dayjs**: 一个轻量级的处理时间和日期的JavaScript库。
 
 ### 后端
 
@@ -28,6 +31,9 @@
 - **Elasticsearch**: 一个强大的开源搜索引擎，用于存储、搜索和分析大量数据。
 - **Sentence-Transformers**: 一个Python框架，用于计算句子和文本的嵌入向量。
 - **Uvicorn**: 一个闪电般快速的ASGI服务器。
+- **PyPDF2**: 用于处理PDF文件的Python库。
+- **python-multipart**: 用于处理multipart/form-data请求的Python库。
+- **requests**: 一个简单而优雅的HTTP库。
 
 ## 项目架构
 

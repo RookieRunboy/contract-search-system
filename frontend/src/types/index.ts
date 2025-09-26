@@ -14,6 +14,8 @@ export interface ContractSearchResult {
   chunks: DocumentChunk[];
   metadata_info?: ContractMetadata; // 合同元数据信息
   metadata_score?: number; // 元数据匹配分数
+  contract_amount?: number | null; // 合同金额（便于直接展示）
+  signing_date?: string | null; // 签订日期（便于直接展示）
 }
 
 // 搜索结果类型（保持向后兼容）

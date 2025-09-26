@@ -119,6 +119,46 @@ const SearchPage: FC = () => {
     return { color: 'error', text: '低度相关' };
   };
 
+  const normalizeAmountValue = (value: unknown): number | null => {
+    if (typeof value === 'number' && !Number.isNaN(value)) {
+      return value;
+    }
+    if (typeof value === 'string') {
+      const cleaned = value.replace(/[,\s]/g, '');
+      if (!cleaned) {
+        return null;
+      }
+      const parsed = Number(cleaned);
+      return Number.isNaN(parsed) ? null : parsed;
+    }
+    return null;
+  };
+
+  const formatAmountDisplay = (amount: number | null): string => {
+    if (amount === null || amount === undefined || Number.isNaN(amount)) {
+      return '暂无签订金额';
+    }
+    return `¥${amount.toLocaleString('zh-CN', { maximumFractionDigits: 2 })}`;
+  };
+
+  const normalizeSigningDate = (value: unknown): string | null => {
+    if (typeof value === 'string' && value.trim() !== '') {
+      return value.trim();
+    }
+    return null;
+  };
+
+  const formatSigningDateDisplay = (value: string | null): string => {
+    if (!value) {
+      return '暂无签订时间';
+    }
+    const parsed = dayjs(value);
+    if (parsed.isValid()) {
+      return parsed.format('YYYY-MM-DD');
+    }
+    return value;
+  };
+
   const handleDownload = async (contractName: string) => {
     try {
       // 确保文件名包含.pdf扩展名
@@ -599,6 +639,12 @@ const SearchPage: FC = () => {
             dataSource={searchResults}
             renderItem={(contract) => {
               const scoreTag = getScoreTag(contract.score);
+              const amountSource = contract.contract_amount ?? contract.metadata_info?.contract_amount ?? null;
+              const signingDateSource = contract.signing_date ?? contract.metadata_info?.signing_date ?? null;
+              const normalizedAmount = normalizeAmountValue(amountSource);
+              const normalizedSigningDate = normalizeSigningDate(signingDateSource);
+              const amountDisplay = formatAmountDisplay(normalizedAmount);
+              const signingDateDisplay = formatSigningDateDisplay(normalizedSigningDate);
               return (
                 <List.Item className="result-item">
                   <Card className="result-card"
@@ -619,7 +665,7 @@ const SearchPage: FC = () => {
                             )}
                           </Space>
                         </div>
-                        <Space>
+                        <Space wrap>
                           <Tag 
                             color={scoreTag.color}
                             className="result-score-tag"
@@ -632,6 +678,12 @@ const SearchPage: FC = () => {
                           >
                             {contract.score.toFixed(1)}
                           </Text>
+                          <Tag color="blue" className="result-score-tag">
+                            签订时间: {signingDateDisplay}
+                          </Tag>
+                          <Tag color="geekblue" className="result-score-tag">
+                            合同金额: {amountDisplay}
+                          </Tag>
                           {contract.metadata_score && contract.metadata_score > 0 && (
                             <Text 
                               style={{ color: '#722ed1', fontSize: '12px' }}

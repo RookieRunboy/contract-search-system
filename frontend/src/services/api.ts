@@ -64,6 +64,18 @@ const toStringValue = (value: unknown): string | undefined => {
   return typeof value === 'string' && value.trim() !== '' ? value : undefined;
 };
 
+const toNullableNumber = (value: unknown): number | null => {
+  const parsed = toNumber(value, Number.NaN);
+  return Number.isNaN(parsed) ? null : parsed;
+};
+
+const toNullableString = (value: unknown): string | null => {
+  if (typeof value === 'string' && value.trim() !== '') {
+    return value.trim();
+  }
+  return null;
+};
+
 export const normalizeSearchList = (rawList: unknown): ContractSearchResult[] => {
   if (!Array.isArray(rawList)) {
     return [];
@@ -84,11 +96,20 @@ export const normalizeSearchList = (rawList: unknown): ContractSearchResult[] =>
         highlights?: Record<string, any>;
       };
       const contractName = toStringValue(contractItem.contract_name) ?? toStringValue(contractItem.contractName);
+      const metadataInfo = (contractItem.metadata_info && typeof contractItem.metadata_info === 'object')
+        ? contractItem.metadata_info as ContractMetadata
+        : undefined;
+      const signingDate = toNullableString((contractItem as any).signing_date ?? metadataInfo?.signing_date);
+      const contractAmount = toNullableNumber((contractItem as any).contract_amount ?? metadataInfo?.contract_amount);
+      const metaScoreRaw = toNumber(contractItem.metadata_score ?? (contractItem as any).metadata_score, Number.NaN);
+      const normalizedMetadataScore = Number.isNaN(metaScoreRaw) ? undefined : metaScoreRaw;
       return {
         contract_name: contractName ?? '未知合同',
         score: toNumber(contractItem.combined_score ?? contractItem.score),
-        metadata_info: contractItem.metadata_info,
-        metadata_score: toNumber(contractItem.metadata_score),
+        metadata_info: metadataInfo,
+        metadata_score: normalizedMetadataScore,
+        contract_amount: contractAmount,
+        signing_date: signingDate,
         chunks: Array.isArray(contractItem.chunks)
           ? contractItem.chunks.map((chunk) => ({
             score: toNumber(chunk.score),
@@ -122,6 +143,14 @@ export const normalizeSearchList = (rawList: unknown): ContractSearchResult[] =>
       return;
     }
 
+    const metadataInfo = (record.metadata_info && typeof record.metadata_info === 'object')
+      ? record.metadata_info as ContractMetadata
+      : undefined;
+    const signingDate = toNullableString((record as any).signing_date ?? metadataInfo?.signing_date);
+    const contractAmount = toNullableNumber((record as any).contract_amount ?? metadataInfo?.contract_amount);
+    const metadataScoreRaw = toNumber(record.metadata_score ?? (record as any).metadata_score, Number.NaN);
+    const normalizedMetadataScore = Number.isNaN(metadataScoreRaw) ? undefined : metadataScoreRaw;
+
     const chunk: DocumentChunk = {
       score: toNumber(record.score),
       page_id: toNumber(record.page_id ?? record.pageId ?? record.page_num ?? record.pageNum, 0),
@@ -134,8 +163,10 @@ export const normalizeSearchList = (rawList: unknown): ContractSearchResult[] =>
       grouped.set(contractName, {
         contract_name: contractName,
         score: chunk.score,
-        metadata_info: record.metadata_info,
-        metadata_score: toNumber(record.metadata_score),
+        metadata_info: metadataInfo,
+        metadata_score: normalizedMetadataScore,
+        contract_amount: contractAmount,
+        signing_date: signingDate,
         chunks: [chunk],
       });
       return;
@@ -144,9 +175,17 @@ export const normalizeSearchList = (rawList: unknown): ContractSearchResult[] =>
     const existing = grouped.get(contractName)!;
     existing.score = Math.max(existing.score, chunk.score);
     // 保留第一个遇到的metadata_info
-    if (!existing.metadata_info && record.metadata_info) {
-      existing.metadata_info = record.metadata_info;
-      existing.metadata_score = toNumber(record.metadata_score);
+    if (!existing.metadata_info && metadataInfo) {
+      existing.metadata_info = metadataInfo;
+    }
+    if (normalizedMetadataScore !== undefined) {
+      existing.metadata_score = normalizedMetadataScore;
+    }
+    if (existing.contract_amount == null && contractAmount != null) {
+      existing.contract_amount = contractAmount;
+    }
+    if ((existing.signing_date == null || existing.signing_date === '') && signingDate) {
+      existing.signing_date = signingDate;
     }
     existing.chunks.push(chunk);
   });

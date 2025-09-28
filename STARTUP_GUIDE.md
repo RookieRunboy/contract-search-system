@@ -90,20 +90,6 @@ chmod +x start.sh stop.sh
 ./configure.sh disable
 ```
 
-#### 基本用法
-```bash
-./stop.sh                # 停止前后端服务，保留Elasticsearch
-./stop.sh --with-es      # 停止所有服务包括Elasticsearch
-./stop.sh --clean-logs   # 停止服务并清理日志文件
-./stop.sh --help         # 显示帮助信息
-```
-
-#### 功能
-- 安全停止所有服务进程
-- 可选择性停止Elasticsearch
-- 清理PID文件和日志文件
-- 多重保险机制确保进程正确停止
-
 ## 前置要求
 
 ### 必需软件

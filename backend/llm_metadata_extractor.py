@@ -13,9 +13,14 @@ class MetadataExtractor:
         初始化元数据提取器
 
         Args:
-            api_key: DeepSeek API密钥，如果不提供则使用默认密钥
+            api_key: DeepSeek API密钥，如果不提供则尝试从环境变量读取
         """
-        self.api_key = api_key or "sk-aw9MH7Srg9N3vCLV3aA3FbD2A62e4b5c917bE0601c59051c"
+        self.api_key = api_key or os.getenv("DEEPSEEK_API_KEY")
+        if not self.api_key:
+            raise ValueError(
+                "DeepSeek API密钥未提供。请通过参数传入，"
+                "或在环境变量 DEEPSEEK_API_KEY 中设置。"
+            )
         self.api_url = "http://model.aicc.chinasoftinc.com/v1/chat/completions"
         self.model = "DeepSeekV3"
         self.max_retries = 3

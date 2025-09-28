@@ -61,6 +61,18 @@
     ```bash
     ./startest.sh
     ```
+
+### 环境变量配置
+
+后端调用 LLM 服务需要 `DEEPSEEK_API_KEY`。请复制 `backend/.env.example` 为 `backend/.env`（或在系统环境变量中配置），并填写自己的密钥：
+
+```bash
+cp backend/.env.example backend/.env
+echo "DEEPSEEK_API_KEY=你的密钥" >> backend/.env
+```
+
+启动服务前请确保已经加载了该环境变量，例如在 shell 中执行 `export DEEPSEEK_API_KEY=...` 或使用支持 `.env` 文件的进程管理工具。切勿将真实密钥提交到版本库。
+
 ### 传统启动
 #### 后端启动
 

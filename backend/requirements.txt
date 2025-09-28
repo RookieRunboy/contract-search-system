@@ -9,4 +9,8 @@ paddleocr==2.7.0.3
 opencv-python==4.8.1.78
 numpy==1.26.4
 pdf2image==1.17.0
+<<<<<<< HEAD
 Pillow==10.2.0
+=======
+Pillow==10.2.0
+>>>>>>> 9111774 (chore(security): remove hardcoded API key, switch to env var; update metadata extractor to DeepSeek API response schema; misc fixes)

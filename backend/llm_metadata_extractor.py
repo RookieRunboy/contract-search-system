@@ -11,13 +11,13 @@ class MetadataExtractor:
     def __init__(self, api_key: Optional[str] = None):
         """
         初始化元数据提取器
-        
+
         Args:
-            api_key: Qwen API密钥，如果不提供则使用默认密钥
+            api_key: DeepSeek API密钥，如果不提供则使用默认密钥
         """
-        self.api_key = api_key or "sk-c1aeeb5e64a34898b793f6040bda3473"
-        self.api_url = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation"
-        self.model = "qwen-plus-2025-07-28"
+        self.api_key = api_key or "sk-aw9MH7Srg9N3vCLV3aA3FbD2A62e4b5c917bE0601c59051c"
+        self.api_url = "http://model.aicc.chinasoftinc.com/v1/chat/completions"
+        self.model = "DeepSeekV3"
         self.max_retries = 3
         self.retry_delay = 1  # 秒
         
@@ -92,9 +92,9 @@ CONTRACT_TEXT_PLACEHOLDER
 """
         return base_template
     
-    def _call_qwen_api(self, prompt: str) -> str:
+    def _call_llm_api(self, prompt: str) -> str:
         """
-        调用Qwen API
+        调用DeepSeek API
         
         Args:
             prompt: 发送给API的提示词
@@ -112,23 +112,20 @@ CONTRACT_TEXT_PLACEHOLDER
         
         data = {
             "model": self.model,
-            "input": {
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": "你是一个专业的合同分析专家，擅长从合同文本中提取结构化信息。请严格按照要求的JSON格式返回结果。"
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ]
-            },
-            "parameters": {
-                "temperature": 0.1,
-                "max_tokens": 2000,
-                "top_p": 0.9
-            }
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "你是一个专业的合同分析专家，擅长从合同文本中提取结构化信息。请严格按照要求的JSON格式返回结果。"
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            "temperature": 0.1,
+            "max_tokens": 2000,
+            "top_p": 0.95,
+            "stream": False
         }
         
         for attempt in range(self.max_retries):
@@ -137,10 +134,13 @@ CONTRACT_TEXT_PLACEHOLDER
                 
                 if response.status_code == 200:
                     result = response.json()
-                    if "output" in result and "text" in result["output"]:
-                        return result["output"]["text"].strip()
-                    else:
-                        raise Exception(f"API响应格式错误: {result}")
+                    choices = result.get("choices")
+                    if choices and isinstance(choices, list):
+                        message = choices[0].get("message", {})
+                        content = message.get("content")
+                        if content:
+                            return content.strip()
+                    raise Exception(f"API响应格式错误: {result}")
                 elif response.status_code == 429:
                     if attempt < self.max_retries - 1:
                         wait_time = self.retry_delay * (2 ** attempt)  # 指数退避
@@ -361,8 +361,8 @@ CONTRACT_TEXT_PLACEHOLDER
             prompt_template = self._get_prompt_template(contract_type)
             prompt = prompt_template.replace('CONTRACT_TEXT_PLACEHOLDER', contract_text)
             
-            # 调用Qwen API
-            response_text = self._call_qwen_api(prompt)
+            # 调用DeepSeek API
+            response_text = self._call_llm_api(prompt)
             
             # 解析JSON响应
             metadata = self._parse_json_response(response_text)

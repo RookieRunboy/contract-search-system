@@ -1,28 +1,24 @@
-# 将图片发送给大模型进行多模态识别文本
-from openai import OpenAI
-import base64
+# 基于本地 OCR (PaddleOCR) 进行合同文本识别
 import os
 import json
 from pdf2image import convert_from_path
 import time
-from PIL import Image
-import io
 import re
 import shutil
 import uuid
 from pathlib import Path
+import cv2
+import numpy as np
+from paddleocr import PaddleOCR
 
 
 class MultiModalTextExtractor:
-    def __init__(self, api_key="sk-d728d228b2b14698a51a3c452c02cc7c"):
-        self.api_key = api_key
-        if not self.api_key:
-            raise ValueError("API key is required.")
-
-        # 使用Qwen的客户端配置
-        self.client = OpenAI(
-            api_key=self.api_key,
-            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
+    def __init__(self, use_textline_orientation: bool = True, device: str = "cpu"):
+        """初始化本地 OCR 引擎"""
+        self.ocr = PaddleOCR(
+            lang='ch',
+            use_textline_orientation=use_textline_orientation,
+            device=device,
         )
 
     def pdf_to_images(self, pdf_path, dpi=180):
@@ -60,129 +56,30 @@ class MultiModalTextExtractor:
             except Exception as e:
                 print(f"清理临时目录时出错: {str(e)}")
 
-    def optimize_image(self, pil_image, max_size=700):
-        """优化图像大小以减少token消耗"""
-        # 转换为灰度 - 减少数据量
-        pil_image = pil_image.convert('L')
-
-        # 计算新尺寸，保持宽高比
-        width, height = pil_image.size
-        if max(width, height) > max_size:
-            if width > height:
-                new_width = max_size
-                new_height = int(height * (max_size / width))
-            else:
-                new_height = max_size
-                new_width = int(width * (max_size / height))
-
-            # 高质量下采样
-            pil_image = pil_image.resize((new_width, new_height), Image.LANCZOS)
-
-        return pil_image
-
-    def encode_image(self, pil_image, max_size=700, quality=55):
-        """将PIL图像编码为base64（带压缩参数）"""
-        try:
-            # 转换为灰度
-            pil_image = pil_image.convert('L')
-
-            # 调整尺寸
-            width, height = pil_image.size
-            if max(width, height) > max_size:
-                ratio = max_size / max(width, height)
-                new_size = (int(width * ratio), int(height * ratio))
-                pil_image = pil_image.resize(new_size, Image.LANCZOS)
-
-            # 编码图像
-            img_byte_arr = io.BytesIO()
-            pil_image.save(img_byte_arr, format='JPEG', quality=quality)
-            img_data = img_byte_arr.getvalue()
-
-            # 验证和计算token
-            Image.open(io.BytesIO(img_data)).verify()
-            base64_data = base64.b64encode(img_data).decode("utf-8")
-
-            print(f"压缩设置: {max_size}px/质量{quality} → {len(base64_data) // 4} tokens")
-
-            return base64_data
-        except Exception as e:
-            raise ValueError(f"图片编码失败: {str(e)}")
-
     def extract_text_from_image(self, image, page_num):
-        """使用Qwen从单张图片提取文本"""
-        systemPrompt= (
-            "角色：你是一位合同解析专家，接下来请你将给予的图像中的内容转换为文字\n"
-            "输入：图像\n"
-            "操作：将图像中的信息提取为文本信息,注意中英文符合与空格的处理\n"
-            "输出：当前页的图片转换为的文本信息\n"
-            "注意：仅返回识别出的文本内容，不需要任何额外内容\n"
-        )
+        """使用 PaddleOCR 从单页图像提取文本"""
+        try:
+            # 转换为 OpenCV BGR 图像
+            img = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
 
-        # 初始压缩设置
-        compression_levels = [
-            {'max_size': 800, 'quality': 65},
-            {'max_size': 700, 'quality': 55},
-            {'max_size': 640, 'quality': 50},
-            {'max_size': 512, 'quality': 40},
-            {'max_size': 384, 'quality': 30}  # 最低可用质量
-        ]
+            # PaddleOCR 预测返回列表，第 0 项为包含识别结果的字典
+            result = self.ocr.predict(img)
+            result_dict = result[0] if result else {}
+            texts = result_dict.get('rec_texts', []) if isinstance(result_dict, dict) else []
 
-        last_error = None
-        current_image = image.copy()
+            clean_text = '\n'.join(texts).strip()
 
-        for level in compression_levels:
-            try:
-                # 编码图像（使用当前压缩级别）
-                base64_image = self.encode_image(
-                    current_image,
-                    max_size=level['max_size'],
-                    quality=level['quality']
-                )
+            # 空白页检测（保持与原逻辑一致）
+            if len(clean_text) < 20:
+                contract_keywords = ["甲方", "乙方", "条款", "第.*条", "签字", "盖章"]
+                if not any(re.search(kw, clean_text) for kw in contract_keywords):
+                    return "空白页"
 
-                # 使用Qwen API进行识别
-                completion = self.client.chat.completions.create(
-                    model="qwen2.5-vl-32b-instruct",
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": [{"type": "text", "text": systemPrompt}]
-                        },
-                        {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "image_url",
-                                    "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"},
-                                },
-                            ],
-                        }
-                    ],
-                )
+            return clean_text or "空白页"
 
-                text_content = completion.choices[0].message.content
-
-                # 清理API返回的多余内容
-                clean_text = re.sub(r'【.*?】', '', text_content)
-                clean_text = clean_text.strip()
-
-                # 空白页检测
-                if len(clean_text) < 20:
-                    # 检查是否包含合同常见元素
-                    contract_keywords = ["甲方", "乙方", "条款", "第.*条", "签字", "盖章"]
-                    if not any(re.search(kw, clean_text) for kw in contract_keywords):
-                        return "空白页"
-
-                return clean_text
-
-            except Exception as e:
-                last_error = e
-                print(f"⚠️ 压缩级别 {level} 失败 (第{page_num}页): {str(e)}")
-                continue
-
-        # 所有压缩级别都尝试过仍失败
-        error_msg = f"所有压缩尝试均失败 (第{page_num}页): {str(last_error)}"
-        print(f"❌ {error_msg}")
-        return f"ERROR: {error_msg}"
+        except Exception as e:
+            print(f"第{page_num}页OCR识别失败: {str(e)}")
+            return f"ERROR: OCR识别失败 ({str(e)})"
 
     def process_contract(self, pdf_path, output_path):
         """处理整个PDF合同并保存结果"""
@@ -205,11 +102,6 @@ class MultiModalTextExtractor:
                     "text": page_text
                 })
                 print(f"✅ 第{page_num}页完成 ({len(page_text)}字符)")
-
-                # 避免API速率限制
-                if page_num < len(images):
-                    wait_time = 1  # 等待1秒确保不超过限制
-                    time.sleep(wait_time)
 
             except Exception as e:
                 print(f"❌ 第{page_num}页失败: {str(e)}")

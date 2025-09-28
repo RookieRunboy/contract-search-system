@@ -650,7 +650,15 @@ const SearchPage: FC = () => {
                   <Card className="result-card"
                     title={
                       <div className="result-title-container">
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                        <div
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '12px',
+                            flexWrap: 'wrap',
+                            flex: '1 1 auto'
+                          }}
+                        >
                           <Checkbox
                             checked={selectedDocuments.has(contract.contract_name)}
                             onChange={(e) => handleSelectDocument(contract.contract_name, e.target.checked)}
@@ -665,7 +673,24 @@ const SearchPage: FC = () => {
                             )}
                           </Space>
                         </div>
-                        <Space wrap>
+                        <Button
+                          type="primary"
+                          size="small"
+                          icon={<DownloadOutlined />}
+                          onClick={() => handleDownload(contract.contract_name)}
+                          style={{ marginLeft: 'auto' }}
+                        >
+                          导出合同
+                        </Button>
+                        <Space
+                          wrap
+                          size={[4, 4]}
+                          style={{
+                            width: '100%',
+                            justifyContent: 'flex-start',
+                            alignItems: 'center'
+                          }}
+                        >
                           <Tag 
                             color={scoreTag.color}
                             className="result-score-tag"
@@ -691,16 +716,6 @@ const SearchPage: FC = () => {
                               (元数据: {contract.metadata_score.toFixed(1)})
                             </Text>
                           )}
-                          <Button
-                            type="primary"
-                            size="small"
-                            icon={<DownloadOutlined />}
-                            onClick={() => handleDownload(contract.contract_name)}
-                            style={{ marginLeft: '8px' }}
-                          >
-                            导出原文
-                          </Button>
-
                         </Space>
                       </div>
                     }

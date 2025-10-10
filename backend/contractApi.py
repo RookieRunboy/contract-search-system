@@ -2,7 +2,7 @@ from fastapi import FastAPI, File, UploadFile, HTTPException, Query
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from typing import List, Optional
+from typing import Dict, List, Optional, Union
 import uvicorn
 from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime, timezone
@@ -265,8 +265,8 @@ async def upload_document(
     if not files:
         raise HTTPException(status_code=400, detail="请至少上传一个文件")
 
-    success_results: List[dict[str, str | int | None]] = []
-    failed_results: List[dict[str, str | int]] = []
+    success_results: List[Dict[str, Union[str, int, None]]] = []
+    failed_results: List[Dict[str, Union[str, int]]] = []
 
     for upload in files:
         filename = upload.filename or "unknown"
@@ -571,7 +571,8 @@ async def get_document_detail(document_name: str):
         if not es_searcher.es.indices.exists(index=index_name):
             raise HTTPException(status_code=404, detail="索引不存在")
 
-        normalized = Path(document_name).stem or document_name
+        name_only = Path(document_name).name
+        normalized = name_only[:-4] if name_only.lower().endswith('.pdf') else name_only
 
         query = {
             "query": {
@@ -911,7 +912,8 @@ async def save_metadata(request: dict):
             raise HTTPException(status_code=400, detail="缺少必要参数：filename 或 metadata")
         
         # 获取文件名（去除扩展名）
-        contract_name = Path(filename).stem
+        name_only = Path(filename).name
+        contract_name = name_only[:-4] if name_only.lower().endswith('.pdf') else name_only
         
         # 查找第一页文档（pageId=1）
         query = {

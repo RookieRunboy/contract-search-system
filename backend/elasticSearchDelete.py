@@ -64,9 +64,11 @@ class ElasticsearchDocumentDeleter:
         - 实际索引中的 contractName 存的是文件名的“无扩展名”部分
         """
         try:
-            name = Path(filename).name  # 去掉路径
-            stem = Path(name).stem      # 去掉扩展名
-            return stem
+            name = Path(filename).name
+            lower = name.lower()
+            if lower.endswith('.pdf'):
+                return name[:-4]
+            return name
         except Exception:
             return filename
 

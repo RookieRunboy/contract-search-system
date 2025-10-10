@@ -1,16 +1,24 @@
+# Web框架和API
 fastapi==0.104.1
 uvicorn==0.24.0
-elasticsearch==8.11.0
-sentence-transformers==3.0.1
-PyPDF2==3.0.1
 python-multipart==0.0.6
 requests==2.31.0
-paddleocr==2.7.0.3
-opencv-python==4.8.1.78
-numpy==1.26.4
+
+# 搜索引擎
+elasticsearch==8.11.0
+
+# AI和文本处理
+sentence-transformers==3.0.1
+transformers==4.37.2
+
+# PDF处理 - 统一使用OCR识别扫描件
+PyMuPDF==1.23.26
+
+# OCR识别 - 合同文字识别首选
+paddleocr==3.2.0
+
+# 图像处理
+opencv-python==4.6.0.66
 pdf2image==1.17.0
-<<<<<<< HEAD
 Pillow==10.2.0
-=======
-Pillow==10.2.0
->>>>>>> 9111774 (chore(security): remove hardcoded API key, switch to env var; update metadata extractor to DeepSeek API response schema; misc fixes)
+numpy==1.26.4

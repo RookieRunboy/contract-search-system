@@ -139,8 +139,13 @@ const MetadataEditModal: React.FC<MetadataEditModalProps> = ({
       const response = await extractMetadata(filename);
       
       if (response.code === 200 && response.data?.metadata) {
-        const metadataSource = response.data.metadata as Record<string, unknown>;
-        const rawSigningDate = metadataSource['signing_date'] ?? metadataSource['signingDate'];
+        const metadataSource = response.data.metadata as unknown;
+        let rawSigningDate: unknown = null;
+
+        if (metadataSource && typeof metadataSource === 'object') {
+          const sourceRecord = metadataSource as Record<string, unknown>;
+          rawSigningDate = sourceRecord['signing_date'] ?? sourceRecord['signingDate'];
+        }
 
         const metadata: ContractMetadata = {
           contract_name: filename,

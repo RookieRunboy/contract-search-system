@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 import requests
 import argparse
+from typing import Union
 
 BASE_URL = "http://172.16.5.31:8006"  # 可改为本地 http://localhost:8006
 
@@ -16,7 +17,7 @@ def check_system(base_url: str = BASE_URL):
         print("[system] error:", e)
 
 
-def upload_pdf(pdf_path: str | Path, base_url: str = BASE_URL):
+def upload_pdf(pdf_path: Union[str, Path], base_url: str = BASE_URL):
     url = f"{base_url}/document/add"
     pdf_path = Path(pdf_path)
     assert pdf_path.exists(), f"文件不存在: {pdf_path}"

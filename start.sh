@@ -58,19 +58,23 @@ check_port() {
 wait_for_service() {
     local url=$1
     local service_name=$2
-    local max_attempts=30
+    local max_attempts=${3:-30}
+    local interval=${4:-2}
     local attempt=1
     
     log_info "等待 $service_name 启动..."
     
     while [ $attempt -le $max_attempts ]; do
-        if curl -s -f "$url" > /dev/null 2>&1; then
+        local http_code
+        http_code=$(curl -s -o /dev/null -w "%{http_code}" "$url" || echo "000")
+
+        if [[ $http_code == 2* || $http_code == 3* ]]; then
             log_success "$service_name 已启动"
             return 0
         fi
-        
+
         echo -n "."
-        sleep 2
+        sleep "$interval"
         attempt=$((attempt + 1))
     done
     
@@ -121,8 +125,8 @@ create_index() {
     log_info "检查索引状态..."
     
     # 检查索引是否已存在
-    if curl -s -f "http://localhost:9200/contracts_vector" > /dev/null 2>&1; then
-        log_success "索引 contracts_vector 已存在"
+    if curl -s -f "http://localhost:9200/contracts_unified" > /dev/null 2>&1; then
+        log_success "索引 contracts_unified 已存在"
         return 0
     fi
     
@@ -135,7 +139,7 @@ create_index() {
         log_info "已激活虚拟环境 contract_env"
     fi
     
-    python elasticSearchSettingVector.py
+    python create_unified_index.py
     log_success "索引创建完成"
 }
 
@@ -205,8 +209,13 @@ start_backend() {
     echo $BACKEND_PID > "$PROJECT_ROOT/logs/backend.pid"
     
     # 等待后端启动
-    wait_for_service "http://localhost:8006/health" "后端服务"
-    log_success "后端服务已启动 (PID: $BACKEND_PID)"
+    if wait_for_service "http://localhost:8006/docs" "后端服务" 90 2; then
+        log_success "后端服务已启动 (PID: $BACKEND_PID)"
+    else
+        log_error "后端服务未在预期时间内响应，最近的日志："
+        tail -n 20 "$PROJECT_ROOT/logs/backend.log" || true
+        exit 1
+    fi
 }
 
 # 启动前端服务

@@ -1,11 +1,14 @@
 import requests
 import json
 import time
-from typing import Dict, Any, Optional, Tuple
+import re
+from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime
 import os
 from sentence_transformers import SentenceTransformer
 import numpy as np
+
+from document_processor import DocumentProcessor
 
 class MetadataExtractor:
     def __init__(self, api_key: Optional[str] = None):
@@ -15,12 +18,9 @@ class MetadataExtractor:
         Args:
             api_key: DeepSeek API密钥，如果不提供则尝试从环境变量读取
         """
-        self.api_key = api_key or os.getenv("DEEPSEEK_API_KEY")
+        self.api_key = api_key or os.getenv("CONTRACT_API_KEY") or os.getenv("DEEPSEEK_API_KEY")
         if not self.api_key:
-            raise ValueError(
-                "DeepSeek API密钥未提供。请通过参数传入，"
-                "或在环境变量 DEEPSEEK_API_KEY 中设置。"
-            )
+            print("警告: 未检测到 DeepSeek API 密钥（请设置 CONTRACT_API_KEY），LLM 元数据提取将被跳过。")
         self.api_url = "http://model.aicc.chinasoftinc.com/v1/chat/completions"
         self.model = "DeepSeekV3"
         self.max_retries = 3
@@ -110,6 +110,9 @@ CONTRACT_TEXT_PLACEHOLDER
         Raises:
             Exception: API调用失败时抛出异常
         """
+        if not self.api_key:
+            raise RuntimeError("DeepSeek API 密钥未配置（请设置环境变量 CONTRACT_API_KEY）")
+
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
@@ -344,10 +347,27 @@ CONTRACT_TEXT_PLACEHOLDER
             print(f"生成元数据向量失败: {e}")
             return None
     
+    def _extract_metadata_core(
+        self,
+        contract_text: str,
+        contract_type: str = "unknown",
+    ) -> Tuple[Dict[str, Any], str]:
+        """执行一次LLM调用并返回清理后的元数据与原始响应"""
+        if not contract_text or not contract_text.strip():
+            raise ValueError("合同文本不能为空")
+
+        prompt_template = self._get_prompt_template(contract_type)
+        prompt = prompt_template.replace("CONTRACT_TEXT_PLACEHOLDER", contract_text)
+
+        response_text = self._call_llm_api(prompt)
+        metadata = self._parse_json_response(response_text)
+        cleaned_metadata = self._validate_and_clean_metadata(metadata)
+        return cleaned_metadata, response_text
+
     def extract_metadata(self, contract_text: str, contract_type: str = "unknown") -> Tuple[Dict[str, Any], Optional[np.ndarray]]:
         """
         从合同文本中提取元数据并生成向量
-        
+
         Args:
             contract_text: 合同文本内容
             contract_type: 预期的合同方向，如"金融方向"、"互联网方向"、"电信方向"、"其他"或"unknown"
@@ -358,22 +378,19 @@ CONTRACT_TEXT_PLACEHOLDER
         Raises:
             Exception: 提取过程中发生错误时抛出异常
         """
-        if not contract_text or not contract_text.strip():
-            raise ValueError("合同文本不能为空")
-        
+        if not self.api_key:
+            message = "DeepSeek API 密钥未配置（请设置环境变量 CONTRACT_API_KEY），已跳过 LLM 元数据提取。"
+            print(message)
+            error_result = {
+                'success': False,
+                'error': message,
+                'metadata': None,
+                'raw_response': None
+            }
+            return error_result, None
+
         try:
-            # 获取Prompt模板
-            prompt_template = self._get_prompt_template(contract_type)
-            prompt = prompt_template.replace('CONTRACT_TEXT_PLACEHOLDER', contract_text)
-            
-            # 调用DeepSeek API
-            response_text = self._call_llm_api(prompt)
-            
-            # 解析JSON响应
-            metadata = self._parse_json_response(response_text)
-            
-            # 验证和清理元数据
-            cleaned_metadata = self._validate_and_clean_metadata(metadata)
+            cleaned_metadata, response_text = self._extract_metadata_core(contract_text, contract_type)
             
             # 生成元数据向量
             metadata_vector = self._generate_metadata_vector(cleaned_metadata)
@@ -394,6 +411,212 @@ CONTRACT_TEXT_PLACEHOLDER
                 'raw_response': None
             }
             return error_result, None
+
+    def extract_metadata_from_long_text(
+        self,
+        full_text: str,
+        contract_type: str = "unknown",
+        chunk_size: int = 2500,
+        chunk_overlap: int = 250,
+    ) -> Tuple[Dict[str, Any], Optional[np.ndarray]]:
+        """通过分块与合并流程提取长文本的元数据"""
+        if not full_text or not full_text.strip():
+            raise ValueError("合同文本不能为空")
+
+        if not self.api_key:
+            message = "DeepSeek API 密钥未配置（请设置环境变量 CONTRACT_API_KEY），已跳过 LLM 元数据提取。"
+            print(message)
+            error_result = {
+                'success': False,
+                'error': message,
+                'metadata': None,
+                'raw_response': None
+            }
+            return error_result, None
+
+        processor = DocumentProcessor(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+        chunks = processor._split_text_into_chunks(full_text, chunk_size, chunk_overlap)
+
+        if not chunks:
+            return self.extract_metadata(full_text, contract_type)
+
+        if len(chunks) == 1:
+            return self.extract_metadata(full_text, contract_type)
+
+        metadata_results: List[Dict[str, Any]] = []
+        raw_responses: List[str] = []
+        partial_errors: List[str] = []
+
+        for index, chunk in enumerate(chunks, start=1):
+            try:
+                chunk_metadata, chunk_raw = self._extract_metadata_core(chunk, contract_type)
+                metadata_results.append(chunk_metadata)
+                raw_responses.append(f"Chunk {index}:\n{chunk_raw}")
+            except Exception as exc:  # noqa: BLE001 - 捕获单块异常并继续
+                error_message = f"第 {index} 块提取失败: {exc}"
+                print(error_message)
+                partial_errors.append(error_message)
+
+        if not metadata_results:
+            joined_errors = "; ".join(partial_errors) if partial_errors else "未知错误"
+            error_result = {
+                'success': False,
+                'error': f"所有文本块的元数据提取均失败: {joined_errors}",
+                'metadata': None,
+                'raw_response': None,
+                'chunks_processed': len(chunks),
+                'chunks_succeeded': 0
+            }
+            return error_result, None
+
+        merged_metadata = self._merge_metadata_results(metadata_results)
+        metadata_vector = self._generate_metadata_vector(merged_metadata)
+
+        result: Dict[str, Any] = {
+            'success': True,
+            'metadata': merged_metadata,
+            'raw_response': "\n\n".join(raw_responses) if raw_responses else None,
+            'chunks_processed': len(chunks),
+            'chunks_succeeded': len(metadata_results)
+        }
+
+        if partial_errors:
+            result['partial_errors'] = partial_errors
+
+        return result, metadata_vector
+
+    def _merge_metadata_results(self, metadata_results: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """根据预设规则合并多个元数据结果"""
+        required_fields = [
+            'party_a',
+            'party_b',
+            'contract_type',
+            'contract_amount',
+            'signing_date',
+            'project_description',
+            'positions',
+            'personnel_list',
+        ]
+
+        merged_metadata = {field: None for field in required_fields}
+
+        if not metadata_results:
+            merged_metadata['extracted_at'] = datetime.now().isoformat()
+            return merged_metadata
+
+        first_value_fields = ['party_a', 'party_b', 'contract_type']
+        for field in first_value_fields:
+            for item in metadata_results:
+                value = self._coerce_non_empty_text(item.get(field))
+                if value is not None:
+                    merged_metadata[field] = value
+                    break
+
+        # 签订日期单独处理，确保格式
+        for item in metadata_results:
+            normalized_date = self._normalize_signing_date(item.get('signing_date'))
+            if normalized_date:
+                merged_metadata['signing_date'] = normalized_date
+                break
+
+        merged_metadata['contract_amount'] = self._select_contract_amount(metadata_results)
+
+        text_concat_fields = ['project_description', 'positions', 'personnel_list']
+        for field in text_concat_fields:
+            merged_metadata[field] = self._merge_text_field(metadata_results, field)
+
+        merged_metadata['extracted_at'] = datetime.now().isoformat()
+        return merged_metadata
+
+    def _select_contract_amount(self, metadata_results: List[Dict[str, Any]]) -> Optional[float]:
+        """选择最可信的合同金额（最大值优先）"""
+        max_amount: Optional[float] = None
+        for item in metadata_results:
+            normalized_amount = self._normalize_contract_amount(item.get('contract_amount'))
+            if normalized_amount is None:
+                continue
+            if max_amount is None or normalized_amount > max_amount:
+                max_amount = normalized_amount
+        return max_amount
+
+    def _normalize_contract_amount(self, value: Any) -> Optional[float]:
+        if value is None:
+            return None
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, str):
+            cleaned = value.strip()
+            if not cleaned or cleaned.lower() == 'null':
+                return None
+            cleaned = cleaned.replace(',', '')
+            match = re.search(r"[-+]?\d*\.?\d+", cleaned)
+            if match:
+                try:
+                    return float(match.group())
+                except ValueError:
+                    return None
+        return None
+
+    def _normalize_signing_date(self, value: Any) -> Optional[str]:
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value.strftime('%Y-%m-%d')
+        if isinstance(value, str):
+            candidate = value.strip()
+            if not candidate or candidate.lower() == 'null':
+                return None
+
+            normalized = candidate
+            normalized = normalized.replace('年', '-').replace('月', '-').replace('日', '')
+            normalized = normalized.replace('/', '-').replace('.', '-')
+
+            patterns = ['%Y-%m-%d', '%Y-%m', '%Y%m%d']
+            for pattern in patterns:
+                try:
+                    dt = datetime.strptime(normalized, pattern)
+                    return dt.strftime('%Y-%m-%d')
+                except ValueError:
+                    continue
+
+            if re.match(r'^\d{4}-\d{2}-\d{2}$', normalized):
+                return normalized
+
+        return None
+
+    def _merge_text_field(self, metadata_results: List[Dict[str, Any]], field: str) -> Optional[str]:
+        seen: set[str] = set()
+        merged_parts: List[str] = []
+
+        for item in metadata_results:
+            value = item.get(field)
+            if value is None:
+                continue
+
+            if isinstance(value, list):
+                candidates = [self._coerce_non_empty_text(v) for v in value]
+                normalized_values = [v for v in candidates if v]
+            else:
+                normalized = self._coerce_non_empty_text(value)
+                normalized_values = [normalized] if normalized else []
+
+            for normalized_value in normalized_values:
+                if normalized_value not in seen:
+                    seen.add(normalized_value)
+                    merged_parts.append(normalized_value)
+
+        if not merged_parts:
+            return None
+
+        return "\n".join(merged_parts)
+
+    def _coerce_non_empty_text(self, value: Any) -> Optional[str]:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            cleaned = value.strip()
+            return cleaned or None
+        return str(value).strip() or None
 
 # 使用示例
 if __name__ == "__main__":

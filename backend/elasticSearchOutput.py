@@ -8,15 +8,13 @@ class get_document_by_filename:
         self.index_name = index_name
     
     def _normalize_filename(self, filename: str) -> str:
-        """
-        规范化文件名：
-        - 支持传入 example 或 example.pdf 或包含路径的 /path/example.pdf
-        - 实际索引中的 contractName 存的是文件名的"无扩展名"部分
-        """
+        """仅移除常见的 .pdf 扩展名，保留名称中的其他符号"""
         try:
-            name = Path(filename).name  # 去掉路径
-            stem = Path(name).stem      # 去掉扩展名
-            return stem
+            name = Path(filename).name
+            lower = name.lower()
+            if lower.endswith('.pdf'):
+                return name[:-4]
+            return name
         except Exception:
             return filename
     

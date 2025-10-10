@@ -1,128 +1,132 @@
-import PyPDF2
-import pdfplumber
-import pytesseract
-from pdf2image import convert_from_bytes
-import io
+import os
 from typing import List, Dict, Any
-from PIL import Image
+
+import cv2
+import fitz
+import numpy as np
+from pdf2image import convert_from_bytes
+
 
 class EnhancedPDFExtractor:
     """
-    增强的PDF文本提取器
-    支持多种提取方式：PyPDF2、pdfplumber、OCR
+    结合 PyMuPDF 与可选 PaddleOCR 的PDF文本提取器。
+    默认优先使用 PyMuPDF 提取文本；若需要OCR请设置
+    环境变量 ENABLE_PADDLE_OCR=1 以启用 PaddleOCR 识别。
     """
 
-    def __init__(self):
-        # 设置tesseract路径（如果需要）
-        # pytesseract.pytesseract.tesseract_cmd = '/usr/local/bin/tesseract'
-        pass
+    def __init__(self) -> None:
+        env_flag = os.getenv("ENABLE_PADDLE_OCR", "1").lower()
+        self.enable_ocr = env_flag not in {"0", "false", "no"}
+        self.ocr = None
 
-    def extract_text_pypdf2(self, pdf_bytes: bytes) -> List[str]:
-        """使用PyPDF2提取文本"""
+        if self.enable_ocr:
+            try:
+                from paddleocr import PaddleOCR  # 延迟导入，避免不必要的初始化
+
+                self.ocr = PaddleOCR(
+                    lang='ch',
+                    use_textline_orientation=True,
+                    device='cpu',
+                )
+            except Exception as exc:
+                print(f"警告: PaddleOCR 初始化失败，将回退到 PyMuPDF 文本提取。错误: {exc}")
+                self.enable_ocr = False
+                self.ocr = None
+
+    def extract_text_pymupdf(self, pdf_bytes: bytes) -> List[str]:
+        """使用 PyMuPDF 从PDF提取文本（逐页）。"""
+        texts: List[str] = []
         try:
-            pdf_stream = io.BytesIO(pdf_bytes)
-            pdf_reader = PyPDF2.PdfReader(pdf_stream)
-            texts = []
-            
-            for page in pdf_reader.pages:
-                text = page.extract_text()
-                texts.append(text if text else "")
-            
-            return texts
-        except Exception as e:
-            print(f"PyPDF2提取失败: {str(e)}")
+            with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
+                for page_index in range(doc.page_count):
+                    page = doc.load_page(page_index)
+                    page_text = page.get_text("text") or ""
+                    texts.append(page_text.strip())
+        except Exception as exc:
+            print(f"PyMuPDF文本提取失败: {exc}")
+        return texts
+
+    def pdf_bytes_to_images(self, pdf_bytes: bytes, dpi: int = 180) -> List[np.ndarray]:
+        """将PDF字节流转换为OpenCV可用的图像列表。"""
+        try:
+            images = convert_from_bytes(
+                pdf_bytes,
+                dpi=dpi,
+                fmt='jpeg',
+            )
+            return [cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR) for image in images]
+        except Exception as exc:
+            print(f"PDF转图片失败: {exc}")
             return []
 
-    def extract_text_pdfplumber(self, pdf_bytes: bytes) -> List[str]:
-        """使用pdfplumber提取文本"""
-        try:
-            pdf_stream = io.BytesIO(pdf_bytes)
-            texts = []
-            
-            with pdfplumber.open(pdf_stream) as pdf:
-                for page in pdf.pages:
-                    text = page.extract_text()
-                    texts.append(text if text else "")
-            
-            return texts
-        except Exception as e:
-            print(f"pdfplumber提取失败: {str(e)}")
+    def extract_text_ocr(self, pdf_bytes: bytes, max_pages: int = None) -> List[str]:
+        """使用 PaddleOCR 提取文本。若未启用OCR则返回空列表。"""
+        if not self.enable_ocr or self.ocr is None:
             return []
 
-    def extract_text_ocr(self, pdf_bytes: bytes, max_pages: int = 5) -> List[str]:
-        """使用OCR提取文本（限制页数以避免过长处理时间）"""
         try:
-            # 将PDF转换为图片
-            images = convert_from_bytes(pdf_bytes, first_page=1, last_page=max_pages)
-            texts = []
-            
-            for i, image in enumerate(images):
-                print(f"正在OCR识别第{i+1}页...")
-                # 使用tesseract进行OCR识别
-                text = pytesseract.image_to_string(image, lang='chi_sim+eng')
-                texts.append(text if text else "")
-            
+            images = self.pdf_bytes_to_images(pdf_bytes)
+            if not images:
+                return []
+
+            if max_pages:
+                images = images[:max_pages]
+
+            texts: List[str] = []
+            for page_num, cv_image in enumerate(images, 1):
+                print(f"正在OCR识别第{page_num}页...")
+                result = self.ocr.ocr(cv_image)
+
+                page_text = ""
+                if result and result[0]:
+                    for line in result[0]:
+                        if len(line) >= 2:
+                            text = line[1][0]
+                            confidence = line[1][1]
+                            if confidence > 0.5:
+                                page_text += text + "\n"
+                texts.append(page_text.strip())
+
             return texts
-        except Exception as e:
-            print(f"OCR提取失败: {str(e)}")
+        except Exception as exc:
+            print(f"OCR识别失败: {exc}")
             return []
 
     def extract_text(self, pdf_bytes: bytes, pdf_name: str = None) -> List[Dict[str, Any]]:
-        """
-        智能提取PDF文本，按优先级尝试不同方法
-        
-        参数:
-        pdf_bytes (bytes): PDF文件的字节内容
-        pdf_name (str, optional): PDF文件名
-        
-        返回:
-        list: 包含每页文本信息的JSON格式列表
-        """
-        final_result = []
-        
-        # 方法1: 尝试PyPDF2
-        print("尝试使用PyPDF2提取文本...")
-        texts_pypdf2 = self.extract_text_pypdf2(pdf_bytes)
-        
-        # 方法2: 尝试pdfplumber
-        print("尝试使用pdfplumber提取文本...")
-        texts_pdfplumber = self.extract_text_pdfplumber(pdf_bytes)
-        
-        # 选择最佳结果
-        texts = []
-        if texts_pypdf2 and any(len(text.strip()) > 10 for text in texts_pypdf2):
-            texts = texts_pypdf2
-            print("使用PyPDF2提取结果")
-        elif texts_pdfplumber and any(len(text.strip()) > 10 for text in texts_pdfplumber):
-            texts = texts_pdfplumber
-            print("使用pdfplumber提取结果")
-        else:
-            # 方法3: 使用OCR（仅处理前5页）
-            print("文本提取失败，尝试OCR识别（仅前5页）...")
-            texts = self.extract_text_ocr(pdf_bytes, max_pages=5)
-        
-        # 构建结果
+        """综合提取逻辑：先尝试 PyMuPDF，再按需回退到OCR。"""
+        texts: List[str] = []
+        meaningful: List[str] = []
+
+        if self.enable_ocr:
+            texts = self.extract_text_ocr(pdf_bytes)
+            meaningful = [text for text in texts if text and text.strip()]
+            if meaningful:
+                print("已使用PaddleOCR完成文本识别")
+
+        if not meaningful:
+            pymupdf_texts = self.extract_text_pymupdf(pdf_bytes)
+            meaningful = [text for text in pymupdf_texts if text and text.strip()]
+            if meaningful:
+                texts = pymupdf_texts
+                if self.enable_ocr:
+                    print("PaddleOCR未获取有效文本，回退至PyMuPDF提取")
+            elif not self.enable_ocr:
+                print("PyMuPDF未提取到有效内容。如需OCR识别，请设置 ENABLE_PADDLE_OCR=1 后重试。")
+
+        final_result: List[Dict[str, Any]] = []
         for page_index, text in enumerate(texts, 1):
-            # 改进空白页判断逻辑
-            if not text or len(text.strip()) < 5:
-                page_text = "\n空白页"
-            else:
-                page_text = text.strip()
-            
-            page_info = {
+            page_text = text.strip() if text and text.strip() else "\n空白页"
+            final_result.append({
                 "pdf_name": pdf_name or "unknown",
                 "pageId": page_index,
                 "text": page_text
-            }
-            
-            final_result.append(page_info)
-        
-        # 如果没有提取到任何内容，返回错误信息
+            })
+
         if not final_result:
-            return [{
+            final_result = [{
                 "pdf_name": pdf_name or "unknown",
                 "pageId": 1,
                 "text": "PDF解析失败：无法提取任何文本内容"
             }]
-        
+
         return final_result

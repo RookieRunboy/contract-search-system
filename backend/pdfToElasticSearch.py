@@ -1,11 +1,11 @@
-from simple_pdf_extractor_backup import SimplePDFExtractor
+from pdfToText import MultiModalTextExtractor
 from pathlib import Path
 import json
 import os
 from elasticsearch import Elasticsearch
 from elasticsearch.helpers import bulk
 from sentence_transformers import SentenceTransformer
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional, Union
 from fastapi import FastAPI, File, UploadFile, HTTPException
 import shutil
 from llm_metadata_extractor import MetadataExtractor
@@ -28,7 +28,7 @@ class PDFTextExtractor:
         table_enable (bool): 是否启用表格提取，默认为True
         formula_enable (bool): 是否启用公式提取，默认为False
         """
-        self.extractor = SimplePDFExtractor()
+        self.extractor: Optional[MultiModalTextExtractor] = None
 
     def extract_text(self, pdf_bytes, pdf_name=None):
         """
@@ -41,7 +41,9 @@ class PDFTextExtractor:
         返回:
         list: 包含每页文本信息的JSON格式列表
         """
-        return self.extractor.extract_text(pdf_bytes, pdf_name)
+        if self.extractor is None:
+            self.extractor = MultiModalTextExtractor()
+        return self.extractor.extract_pdf_bytes(pdf_bytes, pdf_name)
 
 class JSONToElasticsearch:
     def __init__(self, es_host: str ="http://localhost:9200", model_name: str ="BAAI/bge-base-zh", index_name: str ="contracts_unified"):
@@ -111,7 +113,7 @@ class JSONToElasticsearch:
         """
         try:
             # 提取元数据和向量
-            metadata_result, metadata_vector = self.metadata_extractor.extract_metadata(full_text)
+            metadata_result, metadata_vector = self.metadata_extractor.extract_metadata_from_long_text(full_text)
             
             if not metadata_result.get('success', False):
                 print(f"元数据提取失败: {metadata_result.get('error', '未知错误')}")
@@ -213,7 +215,7 @@ class PdfToElasticsearch:
     def __init__(self):
         self.pdfExtractor = PDFTextExtractor()
         self.jsonExtractor = JSONToElasticsearch()
-    def start_process(self, file: UploadFile) -> dict[str, str | None | int]:
+    def start_process(self, file: UploadFile) -> Dict[str, Optional[Union[str, int]]]:
         try:
             allowed_types = [
                 'application/pdf',

@@ -1,171 +1,295 @@
-# 基于本地 OCR (PaddleOCR) 进行合同文本识别
-import os
+from __future__ import annotations
+
+import base64
+import io
 import json
-from pdf2image import convert_from_path
-import time
+import os
 import re
-import shutil
-import uuid
+import tempfile
+import time
 from pathlib import Path
-import cv2
-import numpy as np
-from paddleocr import PaddleOCR
+from typing import Dict, Iterable, List, Optional, Tuple
+
+import requests
+from pdf2image import convert_from_path
+from PIL import Image, ImageOps
 
 
 class MultiModalTextExtractor:
-    def __init__(self, use_textline_orientation: bool = True, device: str = "cpu"):
-        """初始化本地 OCR 引擎"""
-        self.ocr = PaddleOCR(
-            lang='ch',
-            use_textline_orientation=use_textline_orientation,
-            device=device,
-        )
+    """使用通义千问多模态大模型识别合同文本的封装。"""
 
-    def pdf_to_images(self, pdf_path, dpi=180):
-        """将PDF转换为图像列表（避免临时文件问题）"""
-        print(f"正在转换PDF: {pdf_path}")
+    DEFAULT_MODEL = "qwen3-vl-30b-a3b-instruct"
+    DEFAULT_MAX_TOKENS = 4096
+    DEFAULT_COMPRESS_PRESETS: Tuple[Tuple[int, int], ...] = (
+        (2200, 90),
+        (1800, 85),
+        (1500, 80),
+        (1200, 75),
+        (1000, 70),
+    )
 
-        # 创建自定义临时目录
-        # temp_dir = os.path.join(os.path.dirname(pdf_path), f"temp_{uuid.uuid4().hex}")
-        # os.makedirs(temp_dir, exist_ok=True)
+    SYSTEM_PROMPT = (
+        "你是专业的合同解析助手。请将提供的合同页面转换为可阅读的中文段落，"
+        "保留原有条款结构和编号，去除无关噪声。若页面为空或无法识别，"
+        "请返回‘空白页’。"
+    )
 
-        try:
-            images = convert_from_path(
-                pdf_path,
-                dpi=dpi,
-                output_folder=None,
-                fmt='jpeg',
-                thread_count=4,
-                output_file=uuid.uuid4().hex
+    CONTRACT_KEYWORDS = (
+        "甲方",
+        "乙方",
+        "条款",
+        "合同",
+        "签字",
+        "盖章",
+        "服务",
+    )
+
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        api_base: Optional[str] = None,
+        model: Optional[str] = None,
+        max_tokens: Optional[int] = None,
+        timeout: int = 60,
+        max_retries: int = 3,
+        retry_delay: float = 2.0,
+    ) -> None:
+        self.api_key = api_key or os.getenv("QWEN_API_KEY") or os.getenv("DASHSCOPE_API_KEY")
+        if not self.api_key:
+            raise RuntimeError(
+                "Qwen API key 未配置。请设置环境变量 QWEN_API_KEY 或 DASHSCOPE_API_KEY。"
             )
-            print(f"成功转换 {len(images)} 页")
-            return images
-        # finally:
-        #     # 确保在函数结束时清理临时目录
-        #     self.cleanup_temp_dir(temp_dir)
-        except Exception as e:
-            print(f"PDF转换失败: {str(e)}")
-            raise
 
-    def cleanup_temp_dir(self, temp_dir):
-        """安全清理临时目录"""
-        if os.path.exists(temp_dir):
-            print(f"清理临时目录: {temp_dir}")
+        self.api_base = (api_base or os.getenv("QWEN_API_BASE") or "https://dashscope.aliyuncs.com/compatible-mode/v1").rstrip("/")
+        self.model = model or os.getenv("QWEN_MM_MODEL") or self.DEFAULT_MODEL
+        self.max_tokens = max_tokens or self.DEFAULT_MAX_TOKENS
+        self.timeout = timeout
+        self.max_retries = max_retries
+        self.retry_delay = retry_delay
+        self.session = requests.Session()
+
+    # ---------------------- 图像与压缩相关 ----------------------
+    def pdf_to_images(self, pdf_path: Path, dpi: int = 220) -> List[Image.Image]:
+        """将 PDF 转换为 PIL 图片列表。"""
+        pdf_path = Path(pdf_path)
+        if not pdf_path.exists():
+            raise FileNotFoundError(f"未找到 PDF 文件: {pdf_path}")
+
+        images = convert_from_path(
+            str(pdf_path),
+            dpi=dpi,
+            fmt="jpeg",
+            thread_count=4,
+            output_folder=None,
+            use_pdftocairo=True,
+        )
+        return images
+
+    def _iter_compressed_images(self, image: Image.Image) -> Iterable[Tuple[str, Dict[str, int]]]:
+        """生成多档压缩后的 base64 图像。"""
+        grayscale = ImageOps.grayscale(image)
+        width, height = grayscale.size
+        max_side = max(width, height)
+
+        for target_side, quality in self.DEFAULT_COMPRESS_PRESETS:
+            if max_side > target_side:
+                scale = target_side / float(max_side)
+                resized = grayscale.resize(
+                    (int(width * scale), int(height * scale)),
+                    resample=Image.LANCZOS,
+                )
+            else:
+                resized = grayscale
+
+            buffer = io.BytesIO()
+            resized.save(buffer, format="JPEG", quality=quality)
+            encoded = base64.b64encode(buffer.getvalue()).decode("utf-8")
+            yield encoded, {"max_side": target_side, "quality": quality}
+
+    # ---------------------- 大模型调用 ----------------------
+    def _call_vision_model(self, image_b64: str) -> str:
+        """调用通义千问多模态接口。"""
+        url = f"{self.api_base}/chat/completions"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}",
+        }
+
+        payload = {
+            "model": self.model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": [
+                        {"type": "text", "text": self.SYSTEM_PROMPT},
+                    ],
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "请识别以下合同页面的全部文字内容。"},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{image_b64}",
+                            },
+                        },
+                    ],
+                },
+            ],
+            "temperature": 0.1,
+            "max_tokens": self.max_tokens,
+            "top_p": 0.9,
+        }
+
+        for attempt in range(1, self.max_retries + 1):
             try:
-                shutil.rmtree(temp_dir, ignore_errors=True)
-            except Exception as e:
-                print(f"清理临时目录时出错: {str(e)}")
+                response = self.session.post(
+                    url,
+                    headers=headers,
+                    json=payload,
+                    timeout=self.timeout,
+                )
+                if response.status_code == 429 and attempt < self.max_retries:
+                    time.sleep(self.retry_delay * attempt)
+                    continue
 
-    def extract_text_from_image(self, image, page_num):
-        """使用 PaddleOCR 从单页图像提取文本"""
-        try:
-            # 转换为 OpenCV BGR 图像
-            img = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+                response.raise_for_status()
+                data = response.json()
+                message = data.get("choices", [{}])[0].get("message", {})
+                content = message.get("content")
+                if isinstance(content, list):
+                    text_parts = [part.get("text", "") for part in content if part.get("type") == "text"]
+                    return "\n".join(text_parts).strip()
+                if isinstance(content, str):
+                    return content.strip()
+                raise ValueError(f"未能解析接口返回内容: {data}")
+            except (requests.RequestException, ValueError) as exc:
+                if attempt == self.max_retries:
+                    raise
+                time.sleep(self.retry_delay * attempt)
 
-            # PaddleOCR 预测返回列表，第 0 项为包含识别结果的字典
-            result = self.ocr.predict(img)
-            result_dict = result[0] if result else {}
-            texts = result_dict.get('rec_texts', []) if isinstance(result_dict, dict) else []
+        raise RuntimeError("模型接口调用失败")
 
-            clean_text = '\n'.join(texts).strip()
+    # ---------------------- 文本后处理 ----------------------
+    @staticmethod
+    def _cleanup_response(text: str) -> str:
+        if not text:
+            return ""
 
-            # 空白页检测（保持与原逻辑一致）
-            if len(clean_text) < 20:
-                contract_keywords = ["甲方", "乙方", "条款", "第.*条", "签字", "盖章"]
-                if not any(re.search(kw, clean_text) for kw in contract_keywords):
-                    return "空白页"
+        cleaned = text.strip()
+        cleaned = re.sub(r"^```[a-zA-Z]*", "", cleaned)
+        cleaned = cleaned.replace("```", "")
+        cleaned = re.sub(r"\s+\n", "\n", cleaned)
+        cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+        return cleaned.strip()
 
-            return clean_text or "空白页"
+    def _is_meaningful(self, text: str) -> bool:
+        if not text or not text.strip():
+            return False
+        if len(text.strip()) >= 30:
+            return True
+        return any(keyword in text for keyword in self.CONTRACT_KEYWORDS)
 
-        except Exception as e:
-            print(f"第{page_num}页OCR识别失败: {str(e)}")
-            return f"ERROR: OCR识别失败 ({str(e)})"
+    # ---------------------- 主流程 ----------------------
+    def extract_text_from_image(self, image: Image.Image, page_num: int) -> str:
+        last_text = ""
+        last_error: Optional[Exception] = None
 
-    def process_contract(self, pdf_path, output_path):
-        """处理整个PDF合同并保存结果"""
-        start_time = time.time()
+        for encoded, meta in self._iter_compressed_images(image):
+            try:
+                raw_text = self._call_vision_model(encoded)
+                cleaned = self._cleanup_response(raw_text)
+                if self._is_meaningful(cleaned):
+                    return cleaned
+                if cleaned:
+                    last_text = cleaned
+            except Exception as exc:  # noqa: BLE001 - 捕获后交给上层处理
+                last_error = exc
+                continue
 
-        # 确保输出目录存在
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        if last_text:
+            return last_text
+        if last_error:
+            raise last_error
+        return "空白页"
 
-        # 转换PDF为图像
-        images = self.pdf_to_images(pdf_path)
-        results = []
+    def process_contract(
+        self,
+        pdf_path: Path,
+        output_path: Optional[Path] = None,
+        pdf_name: Optional[str] = None,
+        dpi: int = 220,
+    ) -> List[Dict[str, object]]:
+        """识别整份合同并返回带页码的文本列表。"""
+        pdf_path = Path(pdf_path)
+        images = self.pdf_to_images(pdf_path, dpi=dpi)
 
-        print("开始文本提取...")
+        results: List[Dict[str, object]] = []
+        start = time.time()
+
         for page_num, image in enumerate(images, start=1):
-            print(f"处理第 {page_num}/{len(images)} 页...")
             try:
-                page_text = self.extract_text_from_image(image, page_num)
-                results.append({
-                    "pageId": page_num,
-                    "text": page_text
-                })
-                print(f"✅ 第{page_num}页完成 ({len(page_text)}字符)")
+                text = self.extract_text_from_image(image, page_num)
+                results.append(
+                    {
+                        "pdf_name": pdf_name or pdf_path.stem,
+                        "pageId": page_num,
+                        "text": text or "空白页",
+                    }
+                )
+                print(f"✅ 第{page_num}页识别完成（{len(text)} 字符）")
+            except Exception as exc:
+                print(f"❌ 第{page_num}页识别失败: {exc}")
+                results.append(
+                    {
+                        "pdf_name": pdf_name or pdf_path.stem,
+                        "pageId": page_num,
+                        "text": f"ERROR: {exc}",
+                    }
+                )
 
-            except Exception as e:
-                print(f"❌ 第{page_num}页失败: {str(e)}")
-                results.append({
-                    "pageId": page_num,
-                    "text": f"ERROR: {str(e)}",
-                    "status": "failed"
-                })
+        duration = time.time() - start
+        success_pages = sum(1 for item in results if not str(item.get("text", "")).startswith("ERROR"))
+        print(f"处理完成，成功 {success_pages}/{len(results)} 页，总耗时 {duration:.2f} 秒")
 
-        # 保存结果
-        with open(output_path, 'w', encoding='utf-8') as f:
-            json.dump(results, f, ensure_ascii=False, indent=2)
-
-        # 统计信息
-        success_count = sum(1 for r in results if not r.get("text", "").startswith("ERROR"))
-        duration = time.time() - start_time
-        print(f"\n处理完成! 成功率: {success_count}/{len(images)}页")
-        print(f"总耗时: {duration:.2f}秒")
-        print(f"结果已保存至: {output_path}")
+        if output_path:
+            output_path = Path(output_path)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(output_path, "w", encoding="utf-8") as f:
+                json.dump(results, f, ensure_ascii=False, indent=2)
+            print(f"识别结果已保存：{output_path}")
 
         return results
 
+    def extract_pdf_bytes(
+        self,
+        pdf_bytes: bytes,
+        pdf_name: Optional[str] = None,
+        dpi: int = 220,
+    ) -> List[Dict[str, object]]:
+        """直接处理 PDF 字节内容。"""
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp_file:
+            tmp_file.write(pdf_bytes)
+            tmp_path = Path(tmp_file.name)
+
+        try:
+            return self.process_contract(tmp_path, output_path=None, pdf_name=pdf_name, dpi=dpi)
+        finally:
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except FileNotFoundError:
+                pass
+
 
 if __name__ == "__main__":
-    # 路径配置
-    input_dir = r"D:\Cyc\MyWork\testFiles\input"  # PDF输入目录
-    output_dir = r"output"  # JSON输出目录
+    import argparse
 
-    # 确保输出目录存在
-    os.makedirs(output_dir, exist_ok=True)
+    parser = argparse.ArgumentParser(description="调用通义千问识别 PDF 合同文本")
+    parser.add_argument("pdf", type=str, help="待识别的 PDF 路径")
+    parser.add_argument("--output", type=str, default="output/result.json", help="识别结果输出路径")
+    parser.add_argument("--dpi", type=int, default=220, help="渲染 PDF 的 DPI")
+    args = parser.parse_args()
 
-    # 创建提取器实例
     extractor = MultiModalTextExtractor()
-
-    # 获取input目录下所有PDF文件
-    pdf_files = [f for f in Path(input_dir).glob("*.pdf") if f.is_file()]
-
-    if not pdf_files:
-        print(f"在目录 {input_dir} 中未找到PDF文件")
-    else:
-        print(f"找到 {len(pdf_files)} 个PDF文件待处理:")
-
-    # 逐个处理PDF文件
-    for pdf_path in pdf_files:
-        try:
-            print(f"\n正在处理: {pdf_path.name}")
-            # if(pdf_path.name!= "C200C02EF招行格力智慧园区项目.pdf"):
-            #     continue
-
-            # 生成输出路径
-            output_path = Path(output_dir) / f"{pdf_path.stem}.json"
-
-            # 处理合同并保存结果
-            results = extractor.process_contract(str(pdf_path), str(output_path))
-
-            # 打印处理结果
-            if results:
-                success_pages = sum(1 for r in results if not r.get("text", "").startswith("ERROR"))
-                print(f"处理完成! 成功率: {success_pages}/{len(results)}页")
-                print(f"结果已保存至: {output_path}")
-
-                # 打印第一页预览
-                print("\n第一页内容预览:")
-                print(results[0]['text'][:500] + "...")
-
-        except Exception as e:
-            print(f"处理文件 {pdf_path.name} 时出错: {str(e)}")
+    extractor.process_contract(Path(args.pdf), Path(args.output), dpi=args.dpi)

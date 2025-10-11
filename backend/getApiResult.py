@@ -1,35 +1,17 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from elasticsearch import Elasticsearch
-from sentence_transformers import SentenceTransformer
-import numpy as np
-import torch
+
+from embedding_client import RemoteEmbeddingClient
 
 app = FastAPI()
 
-# 使用NPU
+# 初始化远程向量服务
 try:
-    device = torch.device('npu:7')
-    print(f"Using NPU device: {device}")
-
-    # 验证指定的NPU设备是否可用
-    if not torch.npu.is_available():
-        print("NPU is not available!")
-        device = torch.device('cpu')
-
-    # 加载向量模型，明确指定设备
-    model = SentenceTransformer(
-        "BAAI/bge-base-zh",
-        device=str(device)
-    )
-except Exception as e:
-    print(f"Error setting up NPU device: {e}")
-    # 降级到CPU
-    device = torch.device('cpu')
-    model = SentenceTransformer(
-        "BAAI/bge-base-zh",
-        device='cpu'
-    )
+    embedding_client = RemoteEmbeddingClient(model="bge-m3")
+except Exception as exc:
+    print(f"Embedding service初始化失败: {exc}")
+    embedding_client = None
 
 # Elasticsearch 连接
 es = Elasticsearch("http://localhost:9200")
@@ -46,8 +28,14 @@ class SearchRequest(BaseModel):
 @app.post("/search")
 def semantic_search(request: SearchRequest):
     try:
+        if embedding_client is None:
+            raise RuntimeError("远程向量服务不可用，无法执行向量检索")
+
         # 生成查询向量
-        query_vector = model.encode(request.query_text).tolist()
+        vectors = embedding_client.embed(request.query_text)
+        if not vectors:
+            raise RuntimeError("向量服务返回空结果")
+        query_vector = vectors[0]
 
         # 构建搜索体
         body = {

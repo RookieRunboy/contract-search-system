@@ -1,7 +1,8 @@
 import json
 from typing import List, Dict, Any, Optional
 from elasticsearch import Elasticsearch
-from sentence_transformers import SentenceTransformer
+
+from embedding_client import RemoteEmbeddingClient
 
 
 class ElasticsearchVectorSearch:
@@ -9,7 +10,7 @@ class ElasticsearchVectorSearch:
             self,
             es_host: str = "http://localhost:9200",
             index_name: str = "contracts_unified",
-            model_name: str = "BAAI/bge-base-zh"
+            model_name: str = "bge-m3"
     ):
         """
         初始化Elasticsearch向量搜索类
@@ -18,9 +19,10 @@ class ElasticsearchVectorSearch:
         :param index_name: 索引名称
         :param model_name: 句向量模型名称
         """
+        self.embedding_client: Optional[RemoteEmbeddingClient] = None
         try:
             self.es = Elasticsearch(es_host)
-            self.model = SentenceTransformer(model_name)
+            self.embedding_client = RemoteEmbeddingClient(model=model_name)
             self.index_name = index_name
 
             # 检查连接
@@ -29,6 +31,15 @@ class ElasticsearchVectorSearch:
         except Exception as e:
             print(f"初始化错误: {str(e)}")
             raise
+
+    def _encode_text(self, text: str) -> List[float]:
+        if not self.embedding_client:
+            raise RuntimeError("向量服务未初始化")
+
+        vector_results = self.embedding_client.embed(text)
+        if not vector_results:
+            raise ValueError("Remote embedding service returned empty result")
+        return vector_results[0]
 
     def search(
             self,
@@ -103,7 +114,7 @@ class ElasticsearchVectorSearch:
             text_fields = ["text^1"]
 
         # 生成查询向量
-        query_vector = self.model.encode(query_text).tolist()
+        query_vector = self._encode_text(query_text)
 
         # 构建筛选条件
         filter_clauses = []
@@ -193,7 +204,7 @@ class ElasticsearchVectorSearch:
             return []
         
         # 生成查询向量
-        query_vector = self.model.encode(query_metadata).tolist()
+        query_vector = self._encode_text(query_metadata)
         
         # 构建元数据字段搜索
         metadata_fields = [
@@ -412,7 +423,7 @@ class ElasticsearchVectorSearch:
         try:
             for chunk in chunks:
                 # 生成文档向量
-                text_vector = self.model.encode(chunk['content']).tolist()
+                text_vector = self._encode_text(chunk['content'])
                 
                 # 构建文档
                 doc = {

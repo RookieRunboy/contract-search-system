@@ -17,13 +17,13 @@ def add_test_data():
             'contractName': '测试合同1.pdf',
             'pageId': 1,
             'text': '本合同为房屋租赁合同，甲方为出租人，乙方为承租人。租赁期限为一年，月租金为5000元。',
-            'text_vector': [0.1] * 768
+            'text_vector': [0.1] * 1024
         },
         {
             'contractName': '测试合同2.pdf', 
             'pageId': 1,
             'text': '劳动合同约定工作时间为每周40小时，试用期为3个月，基本工资为8000元每月。',
-            'text_vector': [0.2] * 768
+            'text_vector': [0.2] * 1024
         }
     ]
     

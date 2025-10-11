@@ -5,10 +5,10 @@ import re
 from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime
 import os
-from sentence_transformers import SentenceTransformer
 import numpy as np
 
 from document_processor import DocumentProcessor
+from embedding_client import RemoteEmbeddingClient
 
 class MetadataExtractor:
     def __init__(self, api_key: Optional[str] = None):
@@ -26,13 +26,13 @@ class MetadataExtractor:
         self.max_retries = 3
         self.retry_delay = 1  # 秒
         
-        # 初始化向量模型（与正文内容使用相同的模型）
+        # 初始化向量服务（与正文内容使用相同的模型）
         try:
-            self.vector_model = SentenceTransformer('BAAI/bge-base-zh')
-            print("向量模型加载成功")
+            self.vector_client = RemoteEmbeddingClient(model="bge-m3")
+            print("向量服务初始化成功")
         except Exception as e:
-            print(f"向量模型加载失败: {e}")
-            self.vector_model = None
+            print(f"向量服务初始化失败: {e}")
+            self.vector_client = None
     
     def _get_prompt_template(self, contract_type: str = "unknown") -> str:
         """
@@ -305,8 +305,8 @@ CONTRACT_TEXT_PLACEHOLDER
         Returns:
             元数据向量，如果生成失败则返回None
         """
-        if not self.vector_model:
-            print("向量模型未加载，无法生成元数据向量")
+        if not self.vector_client:
+            print("向量服务未初始化，无法生成元数据向量")
             return None
         
         try:
@@ -339,7 +339,12 @@ CONTRACT_TEXT_PLACEHOLDER
                 return None
             
             # 生成向量
-            vector = self.vector_model.encode(metadata_text)
+            vector_results = self.vector_client.embed(metadata_text)
+            if not vector_results:
+                print("向量服务返回空结果，无法生成向量")
+                return None
+
+            vector = np.asarray(vector_results[0], dtype=float)
             print(f"成功生成元数据向量，维度：{vector.shape}")
             return vector
             

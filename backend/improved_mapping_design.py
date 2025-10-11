@@ -60,7 +60,7 @@ unified_mapping = {
             },
             "text_vector": {
                 "type": "dense_vector",
-                "dims": 768,
+                "dims": 1024,
                 "index": True,
                 "similarity": "cosine"
             },
@@ -146,7 +146,7 @@ example_doc_page1 = {
     "contractName": "sample_contract",
     "pageId": 1,
     "text": "合同第一页内容...",
-    "text_vector": [0.1, 0.2, 0.3],  # 768维向量
+    "text_vector": [0.1, 0.2, 0.3],  # 1024维向量
     "document_metadata": {
         "party_a": "甲方公司",
         "party_b": "乙方公司", 

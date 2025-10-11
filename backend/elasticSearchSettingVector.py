@@ -60,7 +60,7 @@ es.indices.create(
                 },
                 "text_vector": {
                     "type": "dense_vector",
-                    "dims": 768,  # 如果你用的是 bge-base-zh，维度就是 768
+                    "dims": 1024,  # bge-m3 输出 1024 维向量
                     "index": True,
                     "similarity": "cosine"  # 也可以是 l2_norm、dot_product，根据模型向量特性来选
                 }
@@ -68,4 +68,3 @@ es.indices.create(
         }
     }
 )
-

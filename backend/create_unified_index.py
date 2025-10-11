@@ -4,6 +4,7 @@ from elasticsearch import Elasticsearch
 
 
 INDEX_NAME = "contracts_unified"
+VECTOR_DIMENSION = 1024
 
 UNIFIED_MAPPING = {
     "settings": {
@@ -49,7 +50,7 @@ UNIFIED_MAPPING = {
             },
             "text_vector": {
                 "type": "dense_vector",
-                "dims": 768,
+                "dims": VECTOR_DIMENSION,
                 "index": True,
                 "similarity": "cosine"
             },
@@ -72,7 +73,7 @@ UNIFIED_MAPPING = {
                     "extracted_at": {"type": "date"},
                     "metadata_vector": {
                         "type": "dense_vector",
-                        "dims": 768,
+                        "dims": VECTOR_DIMENSION,
                         "index": True,
                         "similarity": "cosine"
                     }

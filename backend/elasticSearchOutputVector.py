@@ -1,14 +1,18 @@
 from elasticsearch import Elasticsearch
 import numpy as np
-from sentence_transformers import SentenceTransformer
+
+from embedding_client import RemoteEmbeddingClient
 
 es = Elasticsearch("http://localhost:9200")
 index_name = "contracts_unified"
 query_text = "银华基金管理股份有限公司"
 
-# 加载中文向量模型（已提前安装并准备好）
-model = SentenceTransformer("BAAI/bge-base-zh")
-query_vector = model.encode(query_text).tolist()  # 转为列表格式，方便JSON序列化
+# 加载远程中文向量模型
+embedding_client = RemoteEmbeddingClient(model="bge-m3")
+vector_results = embedding_client.embed(query_text)
+if not vector_results:
+    raise RuntimeError("远程向量服务返回空结果")
+query_vector = vector_results[0]  # 转为列表格式，方便JSON序列化
 
 body = {
     "size": 3,

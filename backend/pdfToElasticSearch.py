@@ -4,12 +4,13 @@ import json
 import os
 from elasticsearch import Elasticsearch
 from elasticsearch.helpers import bulk
-from sentence_transformers import SentenceTransformer
 from typing import List, Dict, Any, Optional, Union
 from fastapi import FastAPI, File, UploadFile, HTTPException
 import shutil
 from llm_metadata_extractor import MetadataExtractor
 import numpy as np
+
+from embedding_client import RemoteEmbeddingClient
 
 
 
@@ -46,10 +47,11 @@ class PDFTextExtractor:
         return self.extractor.extract_pdf_bytes(pdf_bytes, pdf_name)
 
 class JSONToElasticsearch:
-    def __init__(self, es_host: str ="http://localhost:9200", model_name: str ="BAAI/bge-base-zh", index_name: str ="contracts_unified"):
+    def __init__(self, es_host: str ="http://localhost:9200", model_name: str ="bge-m3", index_name: str ="contracts_unified"):
+        self.embedding_client: Optional[RemoteEmbeddingClient] = None
         try:
             self.es = Elasticsearch(es_host)
-            self.model = SentenceTransformer(model_name)
+            self.embedding_client = RemoteEmbeddingClient(model=model_name)
             self.index_name = index_name
             self.metadata_extractor = MetadataExtractor()
             if not self.es.ping():
@@ -59,10 +61,16 @@ class JSONToElasticsearch:
 
     def load_to_elasticsearch(self, pdf_name: str, pageId: int, text: str, total_pages: int = None, file_size: int = None) -> bool:
         try:
+            if not self.embedding_client:
+                raise RuntimeError("向量服务未初始化")
+
             from datetime import datetime
             
             # 生成文本向量
-            vector = self.model.encode(text).tolist()
+            vector_results = self.embedding_client.embed(text)
+            if not vector_results:
+                raise ValueError("Remote embedding service returned empty result")
+            vector = vector_results[0]
 
             # 构建基础文档
             document = {

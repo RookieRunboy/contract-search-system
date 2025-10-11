@@ -2,14 +2,15 @@ import json
 import os
 from elasticsearch import Elasticsearch
 from elasticsearch.helpers import bulk
-from sentence_transformers import SentenceTransformer
+
+from embedding_client import RemoteEmbeddingClient
 
 # 初始化 ES
 es = Elasticsearch("http://localhost:9200")
 index_name = "contracts_unified"
 
-# 加载 bge-base-zh 模型（CPU 环境可运行）
-model = SentenceTransformer("BAAI/bge-base-zh")
+# 初始化远程向量服务
+embedding_client = RemoteEmbeddingClient(model="bge-m3")
 
 # 文件路径
 file_path = r"/Users/runbo/Desktop/合同智能检索/output/contract_text.json"
@@ -23,7 +24,10 @@ with open(file_path, "r", encoding="utf-8") as f:
 actions = []
 for page in pages:
     text = page["text"]
-    vector = model.encode(text).tolist()  # 向量转换并转为 list（ES 要求）
+    vector_results = embedding_client.embed(text)
+    if not vector_results:
+        raise RuntimeError("远程向量服务返回空结果")
+    vector = vector_results[0]  # 向量转换并转为 list（ES 要求）
 
     actions.append({
         "_index": index_name,

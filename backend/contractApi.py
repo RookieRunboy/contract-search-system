@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 import os
 
+from dotenv import load_dotenv
+
 from pdfToElasticSearch import PdfToElasticsearch
 from elasticSearchDelete import ElasticsearchDocumentDeleter
 from elasticSearchSearch import ElasticsearchVectorSearch
@@ -18,6 +20,9 @@ from elasticsearch import exceptions as es_exceptions, helpers
 
 # FastAPI应用
 app = FastAPI(title="contractsSearchAPI")
+
+BACKEND_DIR = Path(__file__).resolve().parent
+load_dotenv(BACKEND_DIR / ".env")
 
 FRONTEND_DIST_PATH = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 FRONTEND_INDEX_FILE = FRONTEND_DIST_PATH / "index.html"

@@ -3,13 +3,10 @@ fastapi==0.104.1
 uvicorn==0.24.0
 python-multipart==0.0.6
 requests==2.31.0
+python-dotenv==1.0.1
 
 # 搜索引擎
 elasticsearch==8.11.0
-
-# AI和文本处理
-sentence-transformers==3.0.1
-transformers==4.37.2
 
 # PDF处理 - 统一使用OCR识别扫描件
 PyMuPDF==1.23.26

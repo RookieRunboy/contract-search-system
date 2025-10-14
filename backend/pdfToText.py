@@ -18,7 +18,7 @@ from PIL import Image, ImageOps
 class MultiModalTextExtractor:
     """使用通义千问多模态大模型识别合同文本的封装。"""
 
-    DEFAULT_MODEL = "qwen3-vl-30b-a3b-instruct"
+    DEFAULT_MODEL = "qwen3vl"
     DEFAULT_MAX_TOKENS = 4096
     DEFAULT_COMPRESS_PRESETS: Tuple[Tuple[int, int], ...] = (
         (2200, 90),
@@ -55,12 +55,15 @@ class MultiModalTextExtractor:
         retry_delay: float = 2.0,
     ) -> None:
         self.api_key = api_key or os.getenv("QWEN_API_KEY") or os.getenv("DASHSCOPE_API_KEY")
-        if not self.api_key:
+
+        default_port = os.getenv("VLLM_PORT", "8000")
+        default_base = f"http://qwen3-vl.sdflakjfajdhfaks.com:{default_port}/v1"
+        self.api_base = (api_base or os.getenv("QWEN_API_BASE") or default_base).rstrip("/")
+
+        if not self.api_key and "dashscope" in self.api_base:
             raise RuntimeError(
                 "Qwen API key 未配置。请设置环境变量 QWEN_API_KEY 或 DASHSCOPE_API_KEY。"
             )
-
-        self.api_base = (api_base or os.getenv("QWEN_API_BASE") or "https://dashscope.aliyuncs.com/compatible-mode/v1").rstrip("/")
         self.model = model or os.getenv("QWEN_MM_MODEL") or self.DEFAULT_MODEL
         self.max_tokens = max_tokens or self.DEFAULT_MAX_TOKENS
         self.timeout = timeout
@@ -112,8 +115,10 @@ class MultiModalTextExtractor:
         url = f"{self.api_base}/chat/completions"
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.api_key}",
         }
+
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
 
         payload = {
             "model": self.model,

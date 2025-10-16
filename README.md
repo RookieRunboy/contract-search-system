@@ -4,6 +4,8 @@
 
 本项目是一个基于AI的智能合同检索系统，旨在提供高效、精准的合同文档管理和检索功能。系统采用前后端分离架构，前端负责用户交互，后端提供核心的文档处理、索引和检索服务。
 
+- 项目仓库: https://github.com/RookieRunboy/contract-search-system
+
 ## 主要功能
 
 - **合同上传**: 支持上传PDF格式的合同文档。
@@ -61,6 +63,13 @@
     ```bash
     ./startest.sh
     ```
+
+### 双启动脚本
+
+- `./start1.sh`：用于本地开发，默认将 `QWEN_API_BASE` 指向本机或本地网关的模型服务（`http://localhost:8000/v1`），随后执行 `start.sh` 完整流程。
+- `./start2.sh`：用于服务器部署，默认将 `QWEN_API_BASE` 指向服务器上的多模态模型网关（`http://qwen3-vl.sdflakjfajdhfaks.com:8000/v1`），再调用同一个 `start.sh`。
+
+如需覆盖默认地址，可在执行脚本前自行 `export QWEN_API_BASE=...`，脚本会优先使用已存在的环境变量值。
 
 ### 环境变量配置
 

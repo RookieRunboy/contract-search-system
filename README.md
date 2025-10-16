@@ -66,8 +66,8 @@
 
 ### 双启动脚本
 
-- `./start1.sh`：用于本地开发，默认将 `QWEN_API_BASE` 指向本机或本地网关的模型服务（`http://localhost:8000/v1`），随后执行 `start.sh` 完整流程。
-- `./start2.sh`：用于服务器部署，默认将 `QWEN_API_BASE` 指向服务器上的多模态模型网关（`http://qwen3-vl.sdflakjfajdhfaks.com:8000/v1`），再调用同一个 `start.sh`。
+- `./start1.sh`：用于服务器部署，默认将 `QWEN_API_BASE` 指向宿主机映射端口（`http://localhost:18000/v1`），随后执行 `start.sh` 完整流程。
+- `./start2.sh`：用于 Mac 本地开发，默认将 `QWEN_API_BASE` 指向公网域名或 hosts 映射（`http://qwen3-vl.sdflakjfajdhfaks.com:8000/v1`），再调用同一个 `start.sh`。
 
 如需覆盖默认地址，可在执行脚本前自行 `export QWEN_API_BASE=...`，脚本会优先使用已存在的环境变量值。
 

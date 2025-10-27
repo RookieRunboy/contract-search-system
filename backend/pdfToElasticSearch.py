@@ -1,16 +1,14 @@
 from pdfToText import MultiModalTextExtractor
 from pathlib import Path
-import json
-import os
-from elasticsearch import Elasticsearch
-from elasticsearch.helpers import bulk
-from typing import List, Dict, Any, Optional, Union
-from fastapi import FastAPI, File, UploadFile, HTTPException
-import shutil
-from llm_metadata_extractor import MetadataExtractor
-import numpy as np
+from typing import Any, Callable, Dict, List, Optional, Union
 
+from elasticsearch import Elasticsearch
+from fastapi import HTTPException, UploadFile
+
+from llm_metadata_extractor import MetadataExtractor
 from embedding_client import RemoteEmbeddingClient
+
+StatusCallback = Optional[Callable[[str, Dict[str, Any]], None]]
 
 
 
@@ -58,6 +56,28 @@ class JSONToElasticsearch:
                 raise ConnectionError("Elasticsearch连接失败")
         except Exception as e:
             print(f"初始化错误:{str(e)}")
+
+    @staticmethod
+    def _metadata_has_values(metadata: Optional[Dict[str, Any]]) -> bool:
+        if not isinstance(metadata, dict):
+            return False
+
+        key_fields = [
+            'party_a',
+            'party_b',
+            'contract_type',
+            'contract_amount',
+            'signing_date',
+            'project_description',
+            'positions',
+            'personnel_list',
+        ]
+
+        for key in key_fields:
+            value = metadata.get(key)
+            if value not in (None, "", [], {}):
+                return True
+        return False
 
     def load_to_elasticsearch(self, pdf_name: str, pageId: int, text: str, total_pages: int = None, file_size: int = None) -> bool:
         try:
@@ -108,28 +128,27 @@ class JSONToElasticsearch:
             print(f"索引文档失败: {str(e)}")
             return False
 
-    def extract_and_update_metadata(self, contract_name: str, full_text: str) -> bool:
-        """
-        提取元数据并更新到第一页文档中
-        
-        Args:
-            contract_name: 合同名称
-            full_text: 完整合同文本
-        
-        Returns:
-            bool: 是否成功更新元数据
-        """
+    def extract_and_update_metadata(self, contract_name: str, full_text: str) -> Dict[str, Any]:
+        """提取元数据并更新到第一页文档中。"""
+
+        result: Dict[str, Any] = {
+            "success": False,
+            "metadata": None,
+            "metadata_vector_generated": False,
+            "has_metadata": False,
+            "error": None,
+        }
+
         try:
-            # 提取元数据和向量
             metadata_result, metadata_vector = self.metadata_extractor.extract_metadata_from_long_text(full_text)
-            
+
             if not metadata_result.get('success', False):
-                print(f"元数据提取失败: {metadata_result.get('error', '未知错误')}")
-                return False
-            
-            metadata = metadata_result.get('metadata', {})
-            
-            # 准备更新的元数据
+                error_msg = metadata_result.get('error', '未知错误')
+                result['error'] = error_msg
+                print(f"元数据提取失败: {error_msg}")
+                return result
+
+            metadata = metadata_result.get('metadata', {}) or {}
             update_data = {
                 "document_metadata": {
                     "party_a": metadata.get('party_a'),
@@ -143,15 +162,14 @@ class JSONToElasticsearch:
                     "extracted_at": metadata.get('extracted_at')
                 }
             }
-            
-            # 如果成功生成了元数据向量，添加到更新数据中
+
             if metadata_vector is not None:
                 update_data["document_metadata"]["metadata_vector"] = metadata_vector.tolist()
+                result['metadata_vector_generated'] = True
                 print(f"成功生成元数据向量，维度: {metadata_vector.shape}")
             else:
                 print("元数据向量生成失败")
-            
-            # 查询第一页文档
+
             query = {
                 "query": {
                     "bool": {
@@ -162,67 +180,178 @@ class JSONToElasticsearch:
                     }
                 }
             }
-            
+
             search_result = self.es.search(index=self.index_name, body=query)
-            
+
             if search_result['hits']['total']['value'] == 0:
-                print(f"未找到合同 {contract_name} 的第一页文档")
-                return False
-            
-            # 更新第一页文档的元数据
+                message = f"未找到合同 {contract_name} 的第一页文档"
+                print(message)
+                result['error'] = message
+                return result
+
             doc_id = search_result['hits']['hits'][0]['_id']
-            
+
             from datetime import datetime
             self.es.update(
                 index=self.index_name,
                 id=doc_id,
-                body={"doc": {**update_data, "updated_at": datetime.now().isoformat()}}
+                body={"doc": {**update_data, "updated_at": datetime.now().isoformat()}},
             )
-            
-            print(f"成功更新合同 {contract_name} 的元数据")
-            return True
-            
-        except Exception as e:
-            print(f"提取和更新元数据失败: {str(e)}")
-            return False
 
-    def json_to_elasticsearch(self, contractJson: List[Dict[str, Any]], file_size: int = None) -> bool:
+            result['success'] = True
+            result['metadata'] = metadata
+            result['has_metadata'] = self._metadata_has_values(metadata)
+            print(f"成功更新合同 {contract_name} 的元数据")
+            return result
+
+        except Exception as e:  # noqa: BLE001
+            message = f"提取和更新元数据失败: {str(e)}"
+            print(message)
+            result['error'] = str(e)
+            return result
+
+    def json_to_elasticsearch(
+        self,
+        contractJson: List[Dict[str, Any]],
+        file_size: int = None,
+        status_callback: StatusCallback = None,
+    ) -> Dict[str, Any]:
+        contract_name = None
+        total_pages = len(contractJson)
+
         try:
-            total_pages = len(contractJson)
-            contract_name = None
-            
-            # 首先索引所有页面
-            for page in contractJson:
-                contract_name = page['pdf_name']  # 记录合同名称
+            if status_callback:
+                status_callback(
+                    "vectorizing",
+                    {
+                        "total_pages": total_pages,
+                        "processed_pages": 0,
+                    },
+                )
+
+            for index, page in enumerate(contractJson, start=1):
+                contract_name = page['pdf_name']
                 self.load_to_elasticsearch(
                     pdf_name=page['pdf_name'],
                     pageId=page['pageId'],
                     text=page['text'],
                     total_pages=total_pages,
-                    file_size=file_size
+                    file_size=file_size,
                 )
-            
-            # 合并所有页面文本用于元数据提取
+
+                if status_callback:
+                    status_callback(
+                        "vectorizing",
+                        {
+                            "total_pages": total_pages,
+                            "processed_pages": index,
+                        },
+                    )
+
+            metadata_status = "skipped"
+            has_metadata = False
+            metadata_error = None
+
             if contract_name and contractJson:
                 full_text = " ".join([page['text'] for page in contractJson])
                 print(f"开始提取合同 {contract_name} 的元数据...")
-                
-                # 提取并更新元数据
-                metadata_success = self.extract_and_update_metadata(contract_name, full_text)
-                if metadata_success:
+
+                if status_callback:
+                    status_callback("metadata_extracting", {"total_pages": total_pages})
+
+                metadata_result = self.extract_and_update_metadata(contract_name, full_text)
+
+                has_metadata = bool(metadata_result.get('has_metadata'))
+                metadata_error = metadata_result.get('error')
+
+                if metadata_result.get('success'):
+                    metadata_status = "extracted" if has_metadata else "empty"
                     print(f"合同 {contract_name} 元数据提取和存储完成")
                 else:
-                    print(f"合同 {contract_name} 元数据提取失败，但文档已成功索引")
-            
-            return True
-        except Exception as e:
+                    if metadata_error and "跳过" in metadata_error:
+                        metadata_status = "skipped"
+                    else:
+                        metadata_status = "failed"
+                    print(f"合同 {contract_name} 元数据提取失败: {metadata_error}")
+
+            result = {
+                "contract_name": contract_name,
+                "total_pages": total_pages,
+                "metadata_status": metadata_status,
+                "has_metadata": has_metadata,
+                "error": metadata_error,
+            }
+
+            if status_callback:
+                status_callback(
+                    "completed",
+                    {
+                        "total_pages": total_pages,
+                        "page_count": total_pages,
+                        "metadata_status": metadata_status,
+                        "has_metadata": has_metadata,
+                        "error": metadata_error,
+                    },
+                )
+
+            return result
+        except Exception as e:  # noqa: BLE001
+            if status_callback:
+                status_callback("failed", {"error": str(e)})
             print(f"批量索引失败: {str(e)}")
-            return False
+            raise
 
 class PdfToElasticsearch:
     def __init__(self):
         self.pdfExtractor = PDFTextExtractor()
         self.jsonExtractor = JSONToElasticsearch()
+    def process_pdf_bytes(
+        self,
+        contents: bytes,
+        filename: str,
+        *,
+        status_callback: StatusCallback = None,
+    ) -> Dict[str, Any]:
+        contract_name = Path(filename).stem
+
+        if status_callback:
+            status_callback("parsing", {})
+
+        contract_json = self.pdfExtractor.extract_text(contents, contract_name)
+        total_pages = len(contract_json)
+
+        if status_callback:
+            status_callback(
+                "parsing",
+                {
+                    "total_pages": total_pages,
+                },
+            )
+
+        indexing_result = self.jsonExtractor.json_to_elasticsearch(
+            contract_json,
+            file_size=len(contents),
+            status_callback=status_callback,
+        )
+
+        return {
+            "status": "success",
+            "pdf_name": filename,
+            "pages": total_pages,
+            "contract_name": contract_name,
+            "metadata_status": indexing_result.get("metadata_status"),
+            "has_metadata": indexing_result.get("has_metadata"),
+        }
+
+    def process_file_path(
+        self,
+        file_path: Path,
+        *,
+        status_callback: StatusCallback = None,
+    ) -> Dict[str, Any]:
+        contents = file_path.read_bytes()
+        return self.process_pdf_bytes(contents, file_path.name, status_callback=status_callback)
+
     def start_process(self, file: UploadFile) -> Dict[str, Optional[Union[str, int]]]:
         try:
             allowed_types = [
@@ -232,27 +361,22 @@ class PdfToElasticsearch:
             if file.content_type not in allowed_types:
                 raise HTTPException(status_code=400, detail="不支持的文件类型")
 
-            # 读取文件内容
             contents = file.file.read()
 
-            # 文件大小检查
             if len(contents) > max_file_size:
                 raise HTTPException(status_code=400, detail="文件过大")
 
-            # 创建上传文件存储目录（统一到项目根目录）
             upload_dir = Path(__file__).resolve().parent.parent / "uploaded_contracts"
             upload_dir.mkdir(exist_ok=True)
-            
-            # 保存原始PDF文件
+
             file_path = upload_dir / file.filename
             with open(file_path, "wb") as f:
                 f.write(contents)
 
-            result = self.pdfExtractor.extract_text(contents, Path(file.filename).stem)
-            self.jsonExtractor.json_to_elasticsearch(result, file_size=len(contents))
-            return {"status": "success", "pdf_name": file.filename, "pages": len(result)}
+            result = self.process_pdf_bytes(contents, file.filename)
+            return {"status": "success", "pdf_name": file.filename, "pages": result.get("pages")}
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             raise HTTPException(status_code=500, detail=str(e))
 
 

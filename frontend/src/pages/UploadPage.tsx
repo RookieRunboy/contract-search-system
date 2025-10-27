@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import type { FC } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import type { FC, ReactNode } from 'react';
 import {
   Upload,
   Button,
@@ -18,11 +18,19 @@ import {
   Collapse,
   Spin,
 } from 'antd';
-import { 
-  InboxOutlined, DeleteOutlined, EyeOutlined, 
-  DownloadOutlined, ReloadOutlined, FileTextOutlined, 
-  CheckCircleOutlined, ExclamationCircleOutlined, ClockCircleOutlined,
-  ExperimentOutlined
+import {
+  InboxOutlined,
+  DeleteOutlined,
+  EyeOutlined,
+  DownloadOutlined,
+  ReloadOutlined,
+  FileTextOutlined,
+  CheckCircleOutlined,
+  ExclamationCircleOutlined,
+  ClockCircleOutlined,
+  ExperimentOutlined,
+  SyncOutlined,
+  CloudUploadOutlined,
 } from '@ant-design/icons';
 import { API_BASE_URL, deleteDocument, getUploadedDocuments, getDocumentDetail } from '../services/api';
 import MetadataEditModal from '../components/MetadataEditModal';
@@ -42,15 +50,29 @@ interface DocumentRecord {
   fileName?: string;
   uploadTime: string;
   parseStatus: 'success' | 'processing' | 'failed' | 'pending';
+  status: string;
+  statusDisplay?: string;
   metadataExtracted: boolean;
   metadataStatus?: string;
   pageCount: number;
   fileSize?: string;
   hasStructuredData: boolean;
   actions: string[];
+  processedPages?: number;
+  totalPages?: number;
+  uploadId?: string;
 }
 
 type UploadDocumentRaw = Record<string, unknown>;
+
+const STATUS_LABELS: Record<string, string> = {
+  pending: '待解析',
+  parsing: '正在转化为文本',
+  vectorizing: '正在向量化',
+  metadata_extracting: '正在提取元数据',
+  completed: '解析成功',
+  failed: '解析失败',
+};
 
 const asString = (value: unknown): string | undefined => {
   return typeof value === 'string' && value.trim() !== '' ? value : undefined;
@@ -262,7 +284,7 @@ const UploadPage: FC = () => {
   const [deleteLoadingKey, setDeleteLoadingKey] = useState<string | null>(null);
 
   // 获取文档列表
-  const fetchDocuments = async () => {
+  const fetchDocuments = useCallback(async (silent = false) => {
     setLoading(true);
     try {
       const response = await getUploadedDocuments();
@@ -275,34 +297,43 @@ const UploadPage: FC = () => {
           }
 
           const contractKey = rawKey.replace(/\.pdf$/i, '');
-          const fileName = pickString(doc, ['file_name', 'fileName']) || (rawKey.endsWith('.pdf') ? rawKey : `${contractKey}.pdf`);
+          const fileName = pickString(doc, ['file_name', 'fileName']) || (rawKey.toLowerCase().endsWith('.pdf') ? rawKey : `${contractKey}.pdf`);
           const displayName = pickString(doc, ['display_name', 'name_display']) || fileName || rawKey;
 
-          const rawUploadTime = pickString(doc, ['uploadTime', 'upload_time']);
+          const rawUploadTime = pickString(doc, ['uploadTime', 'upload_time', 'created_at']);
           let uploadTime = '未知';
           if (rawUploadTime) {
             const parsed = Date.parse(rawUploadTime);
             uploadTime = Number.isNaN(parsed) ? rawUploadTime : new Date(parsed).toLocaleString();
           }
 
-          const rawStatus = (pickString(doc, ['parseStatus', 'parse_status', 'status']) || 'success').toLowerCase();
+          const rawStatusValue = pickString(doc, ['status', 'parseStatus', 'parse_status']);
+          const normalizedStatus = (rawStatusValue || 'completed').toLowerCase().replace(/-/g, '_');
           let parseStatus: DocumentRecord['parseStatus'] = 'success';
-          if (rawStatus.includes('fail')) {
+          if (normalizedStatus === 'failed' || normalizedStatus.includes('fail')) {
             parseStatus = 'failed';
-          } else if (rawStatus.includes('process')) {
-            parseStatus = 'processing';
-          } else if (rawStatus.includes('pending')) {
+          } else if (normalizedStatus === 'pending') {
             parseStatus = 'pending';
+          } else if (normalizedStatus === 'completed') {
+            parseStatus = 'success';
+          } else {
+            parseStatus = 'processing';
           }
 
-          const metadataStatus = pickString(doc, ['metadata_status', 'metadataStatus']);
+          const metadataStatusRaw = pickString(doc, ['metadata_status', 'metadataStatus']);
+          const metadataStatus = metadataStatusRaw ? metadataStatusRaw.toLowerCase() : undefined;
           const metadataExtracted = pickBoolean(doc, ['has_metadata', 'metadataExtracted', 'metadata_extracted'], false)
-            || (typeof metadataStatus === 'string'
-              && ['completed', 'extracted', 'success'].includes(metadataStatus.toLowerCase()));
+            || (metadataStatus !== undefined && ['completed', 'extracted', 'success'].includes(metadataStatus));
 
-          const pageCount = pickNumber(doc, ['pageCount', 'page_count', 'chunks_count', 'pages']) ?? 0;
-          const fileSize = pickString(doc, ['fileSize', 'file_size']);
-          const hasStructuredData = pickBoolean(doc, ['hasStructuredData', 'has_structured_data']);
+          const totalPages = pickNumber(doc, ['total_pages', 'page_count', 'pages']);
+          const processedPages = pickNumber(doc, ['processed_pages']);
+          const pageCount = totalPages ?? pickNumber(doc, ['pageCount', 'chunks_count']) ?? 0;
+          const fileSize = pickString(doc, ['file_size', 'fileSize']);
+          const hasStructuredData = pickBoolean(doc, ['hasStructuredData', 'has_structured_data'], metadataExtracted);
+          const uploadId = pickString(doc, ['upload_id', 'uploadId']);
+          const statusDisplay = pickString(doc, ['status_display', 'statusLabel'])
+            || STATUS_LABELS[normalizedStatus as keyof typeof STATUS_LABELS]
+            || '解析成功';
 
           const actionsValue = doc['actions'];
 
@@ -312,12 +343,17 @@ const UploadPage: FC = () => {
             fileName,
             uploadTime,
             parseStatus,
+            status: normalizedStatus,
+            statusDisplay,
             metadataExtracted,
-            metadataStatus: metadataStatus?.toLowerCase(),
+            metadataStatus,
             pageCount,
-            fileSize,
+            fileSize: fileSize || '-',
             hasStructuredData,
             actions: Array.isArray(actionsValue) ? (actionsValue as string[]) : [],
+            processedPages: processedPages !== undefined ? processedPages : undefined,
+            totalPages: totalPages !== undefined ? totalPages : undefined,
+            uploadId,
           };
         })
         .filter(Boolean) as DocumentRecord[];
@@ -325,11 +361,13 @@ const UploadPage: FC = () => {
       setDocuments(normalized);
     } catch (error) {
       console.error('获取文档列表失败:', error);
-      message.error('获取文档列表失败');
+      if (!silent) {
+        message.error(error instanceof Error ? error.message : '获取文档列表失败');
+      }
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   const showDetail = async (record: DocumentRecord) => {
     setSelectedContractKey(record.contractKey);
@@ -462,27 +500,52 @@ const UploadPage: FC = () => {
   };
 
   // 状态标签渲染
-  const renderStatus = (status: string) => {
-    const statusMap = {
-      success: { color: 'success', icon: <CheckCircleOutlined />, text: '解析成功' },
-      processing: { color: 'processing', icon: <ClockCircleOutlined />, text: '处理中' },
-      failed: { color: 'error', icon: <ExclamationCircleOutlined />, text: '解析失败' },
-      pending: { color: 'default', icon: <ClockCircleOutlined />, text: '待处理' }
+  const renderStatus = (record: DocumentRecord) => {
+    const normalizedStatus = (record.status || 'completed').toLowerCase();
+    const statusMap: Record<string, { color: string; icon: ReactNode; text: string }> = {
+      pending: { color: 'default', icon: <ClockCircleOutlined />, text: STATUS_LABELS.pending },
+      parsing: { color: 'processing', icon: <SyncOutlined spin />, text: STATUS_LABELS.parsing },
+      vectorizing: { color: 'processing', icon: <CloudUploadOutlined />, text: STATUS_LABELS.vectorizing },
+      metadata_extracting: { color: 'processing', icon: <ExperimentOutlined />, text: STATUS_LABELS.metadata_extracting },
+      completed: { color: 'success', icon: <CheckCircleOutlined />, text: STATUS_LABELS.completed },
+      failed: { color: 'error', icon: <ExclamationCircleOutlined />, text: STATUS_LABELS.failed },
+      processing: { color: 'processing', icon: <SyncOutlined spin />, text: '处理中' },
     };
-    
-    const config = statusMap[status as keyof typeof statusMap] || statusMap.success;
-    
+
+    const config = statusMap[normalizedStatus] || statusMap.processing;
+    const label = record.statusDisplay || config.text;
+
+    let progressText = '';
+    if (normalizedStatus === 'vectorizing' && record.totalPages && record.totalPages > 0) {
+      const processed = record.processedPages ?? 0;
+      progressText = ` (${processed}/${record.totalPages}页)`;
+    }
+
     return (
       <Tag color={config.color} icon={config.icon}>
-        {config.text}
+        {label}
+        {progressText}
       </Tag>
     );
   };
 
-  // 元数据提取状态标签（仅两种状态：未提取/已提取）
-  const renderMetadataStatus = (extracted: boolean, _status?: string) => {
-    if (extracted) {
+  // 元数据提取状态标签
+  const renderMetadataStatus = (record: DocumentRecord) => {
+    const status = record.metadataStatus?.toLowerCase();
+    if (record.metadataExtracted || status === 'extracted' || status === 'success' || status === 'completed') {
       return <Tag color="green" icon={<CheckCircleOutlined />}>已提取</Tag>;
+    }
+    if (status === 'metadata_extracting' || status === 'extracting') {
+      return <Tag color="processing" icon={<SyncOutlined spin />}>提取中</Tag>;
+    }
+    if (status === 'empty') {
+      return <Tag color="orange" icon={<ClockCircleOutlined />}>暂无数据</Tag>;
+    }
+    if (status === 'skipped') {
+      return <Tag color="default">已跳过</Tag>;
+    }
+    if (status === 'failed') {
+      return <Tag color="error" icon={<ExclamationCircleOutlined />}>提取失败</Tag>;
     }
     return <Tag color="orange" icon={<ClockCircleOutlined />}>未提取</Tag>;
   };
@@ -510,17 +573,17 @@ const UploadPage: FC = () => {
     },
     {
       title: '解析状态',
-      dataIndex: 'parseStatus',
-      key: 'parseStatus',
-      width: '12%',
-      render: renderStatus,
+      dataIndex: 'status',
+      key: 'status',
+      width: '18%',
+      render: (_: string, record) => renderStatus(record),
     },
     {
       title: '元数据提取状态',
-      dataIndex: 'metadataExtracted',
-      key: 'metadataExtracted',
-      width: '12%',
-      render: (_: boolean, record) => renderMetadataStatus(record.metadataExtracted, record.metadataStatus),
+      dataIndex: 'metadataStatus',
+      key: 'metadataStatus',
+      width: '14%',
+      render: (_: string | undefined, record) => renderMetadataStatus(record),
     },
     {
       title: '页数',
@@ -589,7 +652,23 @@ const UploadPage: FC = () => {
 
   useEffect(() => {
     fetchDocuments();
-  }, []);
+  }, [fetchDocuments]);
+
+  useEffect(() => {
+    if (!documents.length) {
+      return undefined;
+    }
+    const hasInProgress = documents.some((doc) => ['pending', 'parsing', 'processing', 'vectorizing', 'metadata_extracting'].includes(doc.status));
+    if (!hasInProgress) {
+      return undefined;
+    }
+    const timer = window.setInterval(() => {
+      fetchDocuments(true).catch(() => {
+        // ignore polling errors
+      });
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [documents, fetchDocuments]);
 
   const detailMetadataRaw = detailData && typeof detailData === 'object'
     ? (
@@ -611,7 +690,7 @@ const UploadPage: FC = () => {
     ?? detailData?.metadata_status?.toLowerCase();
 
   const detailMetadataReady = Boolean(detailMetadataSource && (
-    detailMetadataStatus === 'completed'
+    detailMetadataStatus === 'completed' || detailMetadataStatus === 'extracted'
     || Object.entries(detailMetadataSource).some(([key, value]) => (
       key !== 'extraction_status' && key !== 'extracted_at'
         ? value !== null && value !== undefined && value !== ''
@@ -707,7 +786,9 @@ const UploadPage: FC = () => {
           <Space>
             <Button 
               icon={<ReloadOutlined />} 
-              onClick={fetchDocuments}
+              onClick={() => {
+                void fetchDocuments();
+              }}
               loading={loading}
             >
               刷新
@@ -743,12 +824,12 @@ const UploadPage: FC = () => {
             setDocuments((prev) => prev.map((d) => {
               // 优先使用contractKey进行精确匹配
               if (m.contractKey && d.contractKey === m.contractKey) {
-                return { ...d, metadataExtracted: true, metadataStatus: 'completed' };
+                return { ...d, metadataExtracted: true, metadataStatus: 'extracted' };
               }
               
               // 备用匹配方式：通过文件名匹配
               if (m.fileName && (d.fileName === m.fileName || d.contractKey === m.fileName.replace(/\.pdf$/i, ''))) {
-                return { ...d, metadataExtracted: true, metadataStatus: 'completed' };
+                return { ...d, metadataExtracted: true, metadataStatus: 'extracted' };
               }
               
               // 最后尝试通过contract_name匹配
@@ -759,7 +840,7 @@ const UploadPage: FC = () => {
                   d.contractKey === m.contract_name.replace(/\.pdf$/i, '');
                 
                 if (isMatch) {
-                  return { ...d, metadataExtracted: true, metadataStatus: 'completed' };
+                  return { ...d, metadataExtracted: true, metadataStatus: 'extracted' };
                 }
               }
               

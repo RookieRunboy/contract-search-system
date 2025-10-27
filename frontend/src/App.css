@@ -5,59 +5,10 @@
   box-sizing: border-box;
   writing-mode: horizontal-tb !important;
   text-orientation: mixed !important;
-}
-
-/* 强制文字水平显示 */
-* {
-  writing-mode: horizontal-tb !important;
-  text-orientation: mixed !important;
   direction: ltr !important;
 }
 
-/* 针对所有文字元素 */
-h1, h2, h3, h4, h5, h6, p, span, div, a, button, input, textarea, label {
-  writing-mode: horizontal-tb !important;
-  text-orientation: mixed !important;
-  direction: ltr !important;
-  display: inline-block !important;
-  width: auto !important;
-  height: auto !important;
-}
-
-/* Ant Design 组件强制水平显示 */
-.ant-typography, .ant-typography h1, .ant-typography h2, .ant-typography h3, .ant-typography h4, .ant-typography h5, .ant-typography h6 {
-  writing-mode: horizontal-tb !important;
-  text-orientation: mixed !important;
-  direction: ltr !important;
-  display: inline-block !important;
-  width: auto !important;
-  height: auto !important;
-}
-
-.ant-card, .ant-card-head, .ant-card-body, .ant-card-meta, .ant-card-meta-title, .ant-card-meta-description {
-  writing-mode: horizontal-tb !important;
-  text-orientation: mixed !important;
-  direction: ltr !important;
-}
-
-.ant-input, .ant-btn, .ant-select, .ant-slider, .ant-badge, .ant-tag, .ant-list, .ant-list-item {
-  writing-mode: horizontal-tb !important;
-  text-orientation: mixed !important;
-  direction: ltr !important;
-}
-
-/* 移除可能导致文字纵向显示的样式 */
-.ant-typography-title, .ant-typography-paragraph, .ant-typography-text {
-  -webkit-writing-mode: horizontal-tb !important;
-  -ms-writing-mode: horizontal-tb !important;
-  writing-mode: horizontal-tb !important;
-  text-orientation: mixed !important;
-  direction: ltr !important;
-  transform: none !important;
-  -webkit-transform: none !important;
-  -ms-transform: none !important;
-}
-
+html,
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
     'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
@@ -65,6 +16,56 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+/* 文本元素保持横向排版 */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+p,
+span,
+div,
+a,
+button,
+input,
+textarea,
+label,
+li,
+ul,
+ol,
+dd,
+dt,
+strong,
+em,
+small,
+code,
+pre,
+td,
+th,
+.ant-typography,
+.ant-typography *,
+.ant-card,
+.ant-card *,
+.ant-upload,
+.ant-upload *,
+.ant-table,
+.ant-table *,
+.ant-descriptions,
+.ant-descriptions *,
+.ant-collapse,
+.ant-collapse *,
+.ant-badge,
+.ant-badge *,
+.ant-tag,
+.ant-tag *,
+.ant-breadcrumb,
+.ant-breadcrumb * {
+  writing-mode: horizontal-tb !important;
+  text-orientation: mixed !important;
+  direction: ltr !important;
 }
 
 #root {

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { FC } from 'react';
-import { Input, Button, Card, List, Space, Typography, Empty, Spin, message, Badge, Tag, Checkbox, Progress, Collapse, DatePicker, InputNumber, Row, Col } from 'antd';
+import { Input, Button, Card, List, Space, Typography, Empty, Spin, message, Badge, Tag, Checkbox, Progress, Collapse, DatePicker, InputNumber, Row, Col, Select } from 'antd';
 import { FileTextOutlined, ThunderboltOutlined, DownloadOutlined, CaretRightOutlined, FilterOutlined } from '@ant-design/icons';
 import { searchDocuments, downloadDocument } from '../services/api';
 import type { ContractSearchResult, ContractMetadata } from '../types/index';
@@ -12,11 +12,22 @@ import '../styles/compact-date-picker.css';
 const { Title, Text } = Typography;
 const { Search } = Input;
 
+const CHINASOFT_ENTITY_NAMES = [
+  '中软国际科技服务有限公司',
+  '上海中软华腾软件系统有限公司',
+  '北京中软国际信息技术有限公司',
+  '深圳中软国际科技服务有限公司',
+  '北京中软国际科技服务有限公司',
+  '中软国际（上海）科技服务有限公司',
+  '中软国际科技服务（湖南）有限公司',
+  'Chinasoft International Technology Service (Hong Kong) Limited',
+];
+
 const SearchPage: FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<ContractSearchResult[]>([]);
   const [loading, setLoading] = useState(false);
-  const [topK, setTopK] = useState(10);
+  const [topK, setTopK] = useState(99);
   // 批量选择相关状态
   const [selectedDocuments, setSelectedDocuments] = useState<Set<string>>(new Set());
   const [batchDownloading, setBatchDownloading] = useState(false);
@@ -30,6 +41,7 @@ const SearchPage: FC = () => {
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [amountMin, setAmountMin] = useState<number | null>(null);
   const [amountMax, setAmountMax] = useState<number | null>(null);
+  const [ourEntityFilter, setOurEntityFilter] = useState<string | null>(null);
 
 
   const handleSearch = async () => {
@@ -51,6 +63,9 @@ const SearchPage: FC = () => {
       }
       if (amountMax !== null) {
         filters.amountMax = amountMax;
+      }
+      if (ourEntityFilter) {
+        filters.ourEntity = ourEntityFilter;
       }
 
       const results = await searchDocuments(searchQuery, topK, filters);
@@ -535,9 +550,28 @@ const SearchPage: FC = () => {
                       style={{ width: '100%' }}
                       placeholder="返回结果数量"
                       min={1}
-                      max={20}
+                      max={99}
                       value={topK}
-                      onChange={(value) => setTopK(value || 10)}
+                      onChange={(value) => setTopK(value ?? 99)}
+                    />
+                  </Col>
+                  <Col xs={24} sm={12}>
+                    <div style={{ marginBottom: '8px' }}>
+                      <Typography.Text strong>我方实体</Typography.Text>
+                    </div>
+                    <Select
+                      allowClear
+                      placeholder="请选择我方实体"
+                      style={{ width: '100%' }}
+                      value={ourEntityFilter ?? undefined}
+                      onChange={(value) => {
+                        if (typeof value === 'string' && value.trim() !== '') {
+                          setOurEntityFilter(value);
+                        } else {
+                          setOurEntityFilter(null);
+                        }
+                      }}
+                      options={CHINASOFT_ENTITY_NAMES.map((name) => ({ label: name, value: name }))}
                     />
                   </Col>
                 </Row>
@@ -549,7 +583,8 @@ const SearchPage: FC = () => {
                       setDateRange(null);
                       setAmountMin(null);
                       setAmountMax(null);
-                      setTopK(10);
+                      setTopK(99);
+                      setOurEntityFilter(null);
                     }}
                     style={{ marginRight: '8px' }}
                   >
@@ -748,24 +783,30 @@ const SearchPage: FC = () => {
                            gap: '8px',
                            fontSize: '13px'
                          }}>
-                           {contract.metadata_info.party_a && (
+                           {(contract.metadata_info.customer_name || contract.metadata_info.party_a) && (
                              <div>
-                               <Text type="secondary">甲方：</Text>
+                               <Text type="secondary">客户名称：</Text>
                                <Text>
                                  {highlightMetadataText(
-                                   contract.metadata_info.party_a, 
-                                   getMetadataHighlights(contract, 'party_a')
+                                   contract.metadata_info.customer_name ?? contract.metadata_info.party_a, 
+                                   Array.from(new Set([
+                                     ...getMetadataHighlights(contract, 'customer_name'),
+                                     ...getMetadataHighlights(contract, 'party_a'),
+                                   ]))
                                  )}
                                </Text>
                              </div>
                            )}
-                           {contract.metadata_info.party_b && (
+                           {(contract.metadata_info.our_entity || contract.metadata_info.party_b) && (
                              <div>
-                               <Text type="secondary">乙方：</Text>
+                               <Text type="secondary">我方实体：</Text>
                                <Text>
                                  {highlightMetadataText(
-                                   contract.metadata_info.party_b, 
-                                   getMetadataHighlights(contract, 'party_b')
+                                   contract.metadata_info.our_entity ?? contract.metadata_info.party_b, 
+                                   Array.from(new Set([
+                                     ...getMetadataHighlights(contract, 'our_entity'),
+                                     ...getMetadataHighlights(contract, 'party_b'),
+                                   ]))
                                  )}
                                </Text>
                              </div>

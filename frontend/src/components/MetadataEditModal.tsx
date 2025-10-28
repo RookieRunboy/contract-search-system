@@ -68,8 +68,8 @@ const MetadataEditModal: React.FC<MetadataEditModalProps> = ({
   const populateFormFields = useCallback((metadata: ContractMetadata | null) => {
     form.setFieldsValue({
       contract_name: filename,
-      party_a: metadata?.party_a ?? '',
-      party_b: metadata?.party_b ?? '',
+      customer_name: metadata?.customer_name ?? '',
+      our_entity: metadata?.our_entity ?? '',
       contract_type: metadata?.contract_type ?? undefined,
       contract_amount: metadata?.contract_amount ?? null,
       signing_date: metadata?.signing_date ? dayjs(metadata.signing_date) : null,
@@ -104,8 +104,8 @@ const MetadataEditModal: React.FC<MetadataEditModalProps> = ({
 
       const metadata: ContractMetadata = {
         contract_name: filename,
-        party_a: normalizeTextValue(values.party_a),
-        party_b: normalizeTextValue(values.party_b),
+        customer_name: normalizeTextValue(values.customer_name),
+        our_entity: normalizeTextValue(values.our_entity),
         contract_type: values.contract_type ?? null,
         contract_amount: normalizeAmountValue(values.contract_amount),
         signing_date: values.signing_date ? (values.signing_date as any).format('YYYY-MM-DD') : null,
@@ -149,8 +149,8 @@ const MetadataEditModal: React.FC<MetadataEditModalProps> = ({
 
         const metadata: ContractMetadata = {
           contract_name: filename,
-          party_a: normalizeTextValue(response.data.metadata.party_a),
-          party_b: normalizeTextValue(response.data.metadata.party_b),
+          customer_name: normalizeTextValue(response.data.metadata.customer_name),
+          our_entity: normalizeTextValue(response.data.metadata.our_entity),
           contract_type: response.data.metadata.contract_type ?? null,
           contract_amount: normalizeAmountValue(response.data.metadata.contract_amount),
           signing_date: normalizeTextValue(rawSigningDate),
@@ -218,12 +218,12 @@ const MetadataEditModal: React.FC<MetadataEditModalProps> = ({
               <Input disabled placeholder="合同名称（自动使用文件名）" />
             </Form.Item>
 
-            <Form.Item label="甲方" name="party_a">
-              <Input placeholder="请输入甲方名称" />
+            <Form.Item label="客户名称" name="customer_name">
+              <Input placeholder="请输入客户名称" />
             </Form.Item>
 
-            <Form.Item label="乙方" name="party_b">
-              <Input placeholder="请输入乙方名称" />
+            <Form.Item label="我方实体" name="our_entity">
+              <Input placeholder="请输入中软国际实体名称（若未提及可留空）" />
             </Form.Item>
 
             <Form.Item

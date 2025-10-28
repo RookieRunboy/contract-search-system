@@ -72,8 +72,8 @@ def _metadata_has_values(metadata: Optional[Dict[str, Any]]) -> bool:
         return False
 
     key_fields = [
-        'party_a',
-        'party_b',
+        'customer_name',
+        'our_entity',
         'contract_type',
         'contract_amount',
         'signing_date',
@@ -549,8 +549,9 @@ async def search_documents(
         amount_max: Optional[float] = Query(default=None, description="合同金额最大值"),
         date_start: Optional[str] = Query(default=None, description="合同签订开始日期 (YYYY-MM-DD)"),
         date_end: Optional[str] = Query(default=None, description="合同签订结束日期 (YYYY-MM-DD)"),
+        our_entity: Optional[str] = Query(default=None, description="我方实体名称（中软国际）"),
         # 其他参数保持不变
-        top_k: Optional[int] = Query(default=3, description="返回结果数量"),
+        top_k: Optional[int] = Query(default=99, description="返回结果数量"),
         text_standard: Optional[int] = Query(default=3, description="标准文本权重"),
         text_ngram: Optional[int] = Query(default=1, description="N-gram文本权重"),
         vector_weight: Optional[float] = Query(default=5.0, description="向量权重"),
@@ -579,11 +580,11 @@ async def search_documents(
             raise HTTPException(status_code=400, detail="混合搜索模式需要至少一个查询参数")
 
         try:
-            top_k_val = int(top_k) if top_k is not None else 3
+            top_k_val = int(top_k) if top_k is not None else 99
         except Exception:
             raise HTTPException(status_code=400, detail="top_k 必须为整数")
-        if top_k_val < 1 or top_k_val > 50:
-            raise HTTPException(status_code=400, detail="top_k 取值范围为 1-50")
+        if top_k_val < 1 or top_k_val > 99:
+            raise HTTPException(status_code=400, detail="top_k 取值范围为 1-99")
 
         try:
             ts_val = int(text_standard) if text_standard is not None else 3
@@ -642,7 +643,8 @@ async def search_documents(
             amount_min=amount_min,
             amount_max=amount_max,
             date_start=date_start,
-            date_end=date_end
+            date_end=date_end,
+            our_entity_filter=our_entity
         )
 
         return {
@@ -672,8 +674,9 @@ async def search_alias(
         amount_max: Optional[float] = Query(default=None, description="合同金额最大值"),
         date_start: Optional[str] = Query(default=None, description="合同签订开始日期 (YYYY-MM-DD)"),
         date_end: Optional[str] = Query(default=None, description="合同签订结束日期 (YYYY-MM-DD)"),
+        our_entity: Optional[str] = Query(default=None, description="我方实体名称（中软国际）"),
         # 其他参数保持不变
-        top_k: Optional[int] = Query(default=3, description="返回结果数量"),
+        top_k: Optional[int] = Query(default=99, description="返回结果数量"),
         text_standard: Optional[int] = Query(default=3, description="标准文本权重"),
         text_ngram: Optional[int] = Query(default=1, description="N-gram文本权重"),
         vector_weight: Optional[float] = Query(default=5.0, description="向量权重"),
@@ -689,6 +692,7 @@ async def search_alias(
         amount_max=amount_max,
         date_start=date_start,
         date_end=date_end,
+        our_entity=our_entity,
         top_k=top_k,
         text_standard=text_standard,
         text_ngram=text_ngram,
@@ -823,7 +827,7 @@ async def get_document_detail(document_name: str):
         has_metadata_flag = False
         if isinstance(document_metadata, dict) and document_metadata:
             key_fields = [
-                'party_a', 'party_b', 'contract_type', 'contract_amount',
+                'customer_name', 'our_entity', 'contract_type', 'contract_amount',
                 'project_description', 'positions', 'personnel_list'
             ]
             has_metadata_flag = any(_is_non_empty(document_metadata.get(k)) for k in key_fields)
@@ -1122,8 +1126,8 @@ async def save_metadata(request: dict):
         # 准备元数据更新
         now_iso = datetime.now(timezone.utc).isoformat()
         metadata_update = {
-            "party_a": metadata.get('party_a'),
-            "party_b": metadata.get('party_b'),
+            "customer_name": metadata.get('customer_name'),
+            "our_entity": metadata.get('our_entity'),
             "contract_type": metadata.get('contract_type'),
             "contract_amount": metadata.get('contract_amount'),
             "signing_date": metadata.get('signing_date'),

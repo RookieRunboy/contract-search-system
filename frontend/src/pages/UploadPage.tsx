@@ -169,8 +169,14 @@ const normalizeContractMetadata = (raw: Record<string, unknown> | null | undefin
     ?? sanitizeTextValue(raw?.['contract_content_summary'])
     ?? sanitizeTextValue(raw?.['contractContentSummary']);
   const contractAmountRaw = raw?.['contract_amount'] ?? raw?.['contractAmount'];
-  const partyARaw = raw?.['party_a'] ?? raw?.['partyA'];
-  const partyBRaw = raw?.['party_b'] ?? raw?.['partyB'];
+  const customerNameRaw = raw?.['customer_name']
+    ?? raw?.['customerName']
+    ?? raw?.['party_a']
+    ?? raw?.['partyA'];
+  const ourEntityRaw = raw?.['our_entity']
+    ?? raw?.['ourEntity']
+    ?? raw?.['party_b']
+    ?? raw?.['partyB'];
   const positionsRaw = raw?.['positions'] ?? raw?.['position'];
   const personnelRaw = raw?.['personnel_list'] ?? raw?.['personnelList'];
   const signingDateRaw = sanitizeTextValue(raw?.['signing_date'])
@@ -181,8 +187,8 @@ const normalizeContractMetadata = (raw: Record<string, unknown> | null | undefin
 
   return {
     contract_name: fileName,
-    party_a: sanitizeTextValue(partyARaw),
-    party_b: sanitizeTextValue(partyBRaw),
+    customer_name: sanitizeTextValue(customerNameRaw),
+    our_entity: sanitizeTextValue(ourEntityRaw),
     contract_type: contractTypeRaw,
     contract_amount: parseContractAmount(contractAmountRaw),
     signing_date: signingDateRaw,
@@ -252,6 +258,8 @@ interface DocumentDetail {
   metadata_status?: string;
   structuredData?: {
     signing_date?: string;
+    customer_name?: string;
+    our_entity?: string;
     party_a?: string;
     party_b?: string;
     contract_type?: string;
@@ -720,8 +728,12 @@ const UploadPage: FC = () => {
               <Divider orientation="left">合同元数据信息</Divider>
               {detailMetadataReady && detailMetadata ? (
                 <Descriptions bordered size="small" column={2}>
-                  <Descriptions.Item label="甲方">{detailMetadata.party_a ?? '-'}</Descriptions.Item>
-                  <Descriptions.Item label="乙方">{detailMetadata.party_b ?? '-'}</Descriptions.Item>
+                  <Descriptions.Item label="客户名称">
+                    {detailMetadata.customer_name ?? detailMetadata.party_a ?? '-'}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="我方实体">
+                    {detailMetadata.our_entity ?? detailMetadata.party_b ?? '-'}
+                  </Descriptions.Item>
                   <Descriptions.Item label="合同方向">{formatContractTypeLabel(detailMetadata.contract_type)}</Descriptions.Item>
                   <Descriptions.Item label="合同金额">{formatAmountDisplay(detailMetadata.contract_amount)}</Descriptions.Item>
                   <Descriptions.Item label="签订日期">{formatDateDisplay(detailMetadata.signing_date)}</Descriptions.Item>

@@ -198,11 +198,12 @@ export interface SearchFilters {
   amountMax?: number;
   dateStart?: string;
   dateEnd?: string;
+  ourEntity?: string | null;
 }
 
 export const searchDocuments = async (
   query: string, 
-  topK: number = 5, 
+  topK: number = 99, 
   filters?: SearchFilters
 ): Promise<ContractSearchResult[]> => {
   // 构建查询参数
@@ -220,6 +221,9 @@ export const searchDocuments = async (
   }
   if (filters?.dateEnd) {
     params.date_end = filters.dateEnd;
+  }
+  if (filters?.ourEntity) {
+    params.our_entity = filters.ourEntity;
   }
 
   // 改为 GET，并通过 query 参数传递

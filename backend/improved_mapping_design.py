@@ -68,7 +68,7 @@ unified_mapping = {
             # 文档级别的元数据（只在第一页存储，避免冗余）
             "document_metadata": {
                 "properties": {
-                    "party_a": {
+                    "customer_name": {
                         "type": "text",
                         "fields": {
                             "keyword": {
@@ -76,7 +76,7 @@ unified_mapping = {
                             }
                         }
                     },
-                    "party_b": {
+                    "our_entity": {
                         "type": "text",
                         "fields": {
                             "keyword": {
@@ -148,8 +148,8 @@ example_doc_page1 = {
     "text": "合同第一页内容...",
     "text_vector": [0.1, 0.2, 0.3],  # 1024维向量
     "document_metadata": {
-        "party_a": "甲方公司",
-        "party_b": "乙方公司", 
+        "customer_name": "甲方公司",
+        "our_entity": "中软国际科技服务有限公司", 
         "contract_type": "技术服务合同",
         "contract_amount": 1000000.0,
         "project_description": "系统开发项目",
@@ -178,7 +178,7 @@ example_doc_page2 = {
 }
 
 print("\n示例查询场景：")
-print("1. 按甲方搜索：document_metadata.party_a:'甲方公司'")
+print("1. 按客户搜索：document_metadata.customer_name:'甲方公司'")
 print("2. 按金额范围：document_metadata.contract_amount:[100000 TO 2000000]")
-print("3. 复合查询：甲方+内容关键词组合搜索")
-print("4. 元数据聚合：按合同类型、甲方等维度统计")
+print("3. 复合查询：客户+内容关键词组合搜索")
+print("4. 元数据聚合：按合同类型、客户等维度统计")

@@ -62,8 +62,10 @@ export interface MenuItem {
 // 合同元数据类型（精简版，只包含必要的6个字段）
 export interface ContractMetadata {
   contract_name: string; // 合同名称（使用上传文件名）
-  party_a: string | null; // 甲方
-  party_b: string | null; // 乙方
+  customer_name: string | null; // 客户名称
+  our_entity: string | null; // 我方实体（中软国际）
+  party_a?: string | null; // 兼容旧数据的甲方字段
+  party_b?: string | null; // 兼容旧数据的乙方字段
   contract_type: string | null; // 合同方向
   contract_amount: number | null; // 合同金额
   signing_date?: string | null; // 签订日期，YYYY-MM-DD
@@ -93,4 +95,5 @@ export interface SearchFilters {
   amountMax?: number;
   dateStart?: string; // YYYY-MM-DD格式
   dateEnd?: string; // YYYY-MM-DD格式
+  ourEntity?: string | null;
 }

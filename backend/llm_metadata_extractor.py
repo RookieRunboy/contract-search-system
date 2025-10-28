@@ -7,6 +7,17 @@ from datetime import datetime
 import os
 import numpy as np
 
+CHINASOFT_ENTITY_NAMES: List[str] = [
+    "中软国际科技服务有限公司",
+    "上海中软华腾软件系统有限公司",
+    "北京中软国际信息技术有限公司",
+    "深圳中软国际科技服务有限公司",
+    "北京中软国际科技服务有限公司",
+    "中软国际（上海）科技服务有限公司",
+    "中软国际科技服务（湖南）有限公司",
+    "Chinasoft International Technology Service (Hong Kong) Limited",
+]
+
 from document_processor import DocumentProcessor
 from embedding_client import RemoteEmbeddingClient
 
@@ -37,33 +48,22 @@ class MetadataExtractor:
     def _get_prompt_template(self, contract_type: str = "unknown") -> str:
         """
         根据合同类型获取相应的Prompt模板
-        
+
         Args:
             contract_type: 合同方向，"金融方向"、"互联网方向"、"电信方向"或"其他"
-        
+
         Returns:
             格式化的Prompt字符串
         """
-        
-        # 精简的提取字段（包含用户要求的8个字段）
-        fields_to_extract = """
-        必须提取的字段：
-        - party_a: 甲方名称
-        - party_b: 乙方名称
-        - contract_type: 合同方向（金融方向【银行、保险、证券】、互联网方向、电信方向、其他）
-        - contract_amount: 合同金额（数字，如果有多个金额取总金额）
-        - signing_date: 合同签订日期（YYYY-MM-DD格式）
-        - project_description: 合同内容（项目描述或服务内容）
-        - positions: 岗位信息
-        - personnel_list: 相关人员清单
-        """
-        
-        base_template = """
+
+        entity_list_text = "\n".join(f"- {name}" for name in CHINASOFT_ENTITY_NAMES)
+
+        base_template = f"""
 你是一个专业的合同分析助手。请仔细分析以下合同文本，并提取关键信息。
 
 必须提取的字段：
-- party_a: 甲方名称
-- party_b: 乙方名称
+- customer_name: 客户名称（通常对应甲方；如存在多个客户，仅输出主要客户）
+- our_entity: 中软国际在合同中的实体名称（仅限以下名单；若未提及请输出null）
 - contract_type: 合同方向（金融方向【银行、保险、证券】、互联网方向、电信方向、其他）
 - contract_amount: 合同金额（数字，如果有多个金额取总金额）
 - signing_date: 合同签订日期（YYYY-MM-DD格式）
@@ -71,29 +71,32 @@ class MetadataExtractor:
 - positions: 岗位信息
 - personnel_list: 相关人员清单
 
-请按照以下要求进行提取：
-1. 仔细阅读合同全文
-2. 准确识别各个字段的信息
-3. 如果某个字段在合同中没有明确提及，请设置为null
-4. 金额请提取数字部分，不包含货币符号
-5. 签订日期请提取为YYYY-MM-DD格式，如2024-01-15
-6. 返回结果必须是有效的JSON格式
-7. 只提取上述指定的8个字段，不要添加其他字段
+中软国际实体名单如下：
+{entity_list_text}
+
+提取规则：
+1. 仔细阅读合同全文，确保字段准确。
+2. 如果合同为三方协议且中软国际被标注为丙方、第三方或类似角色，仅保留甲方对应的客户名称。
+3. 如果未在合同中找到名单内的中软国际实体，请将our_entity设置为null。
+4. 金额请提取数字部分，不包含货币符号。
+5. 签订日期请提取为YYYY-MM-DD格式，如2024-01-15。
+6. 返回结果必须是有效的JSON格式，且只包含上述8个字段。
+7. 若某个字段缺失，请显式写明null。
 
 合同文本：
 CONTRACT_TEXT_PLACEHOLDER
 
 请返回JSON格式的提取结果，格式如下：
-{
-  "party_a": "甲方名称",
-  "party_b": "乙方名称", 
+{{
+  "customer_name": "客户名称或null",
+  "our_entity": "中软国际实体或null",
   "contract_type": "合同方向或null",
   "contract_amount": 数字或null,
   "signing_date": "YYYY-MM-DD或null",
-  "project_description": "合同内容描述",
-  "positions": "岗位信息",
-  "personnel_list": "相关人员清单"
-}
+  "project_description": "合同内容描述或null",
+  "positions": "岗位信息或null",
+  "personnel_list": "相关人员清单或null"
+}}
 """
         return base_template
     
@@ -260,16 +263,16 @@ CONTRACT_TEXT_PLACEHOLDER
     def _validate_and_clean_metadata(self, metadata: Dict[str, Any]) -> Dict[str, Any]:
         """
         验证和清理提取的元数据
-        
+
         Args:
             metadata: 原始元数据字典
-        
+
         Returns:
             清理后的元数据字典
         """
         # 定义精简的字段列表（包含用户要求的8个字段）
         required_fields = [
-            'party_a', 'party_b', 'contract_type', 'contract_amount',
+            'customer_name', 'our_entity', 'contract_type', 'contract_amount',
             'signing_date', 'project_description', 'positions', 'personnel_list'
         ]
         
@@ -289,11 +292,98 @@ CONTRACT_TEXT_PLACEHOLDER
                 cleaned_metadata['contract_amount'] = float(cleaned_metadata['contract_amount'])
             except (ValueError, TypeError):
                 cleaned_metadata['contract_amount'] = None
-        
+
+        cleaned_metadata['customer_name'] = self._normalize_customer_name(cleaned_metadata.get('customer_name'))
+        cleaned_metadata['our_entity'] = self._normalize_chinasoft_entity(cleaned_metadata.get('our_entity'))
+
         # 添加提取时间戳
         cleaned_metadata['extracted_at'] = datetime.now().isoformat()
-        
+
         return cleaned_metadata
+
+    def _normalize_customer_name(self, value: Any) -> Optional[str]:
+        """标准化客户名称，去除我方实体并优先返回甲方"""
+        if value is None:
+            return None
+
+        raw_items: List[Any]
+        if isinstance(value, list):
+            raw_items = value
+        else:
+            raw_items = [value]
+
+        candidates: List[str] = []
+        for item in raw_items:
+            normalized = self._coerce_non_empty_text(item)
+            if not normalized:
+                continue
+
+            parts = re.split(r'[，,、;；/\n]+', normalized)
+            for part in parts:
+                candidate = part.strip()
+                if not candidate:
+                    continue
+                candidate = re.sub(r'^[甲乙丙丁]方[:：\s]*', '', candidate)
+                candidate = re.sub(r'^客户[:：\s]*', '', candidate)
+                candidate = candidate.strip("（）() ")
+                if candidate:
+                    candidates.append(candidate)
+
+        if not candidates:
+            return None
+
+        filtered: List[str] = []
+        seen: set[str] = set()
+        for name in candidates:
+            if any(entity in name for entity in CHINASOFT_ENTITY_NAMES):
+                continue
+            if name not in seen:
+                seen.add(name)
+                filtered.append(name)
+
+        if filtered:
+            return filtered[0]
+
+        return candidates[0]
+
+    def _normalize_chinasoft_entity(self, value: Any) -> Optional[str]:
+        """将我方实体归一化为预设名单中的名称"""
+        if value is None:
+            return None
+
+        raw_items: List[Any]
+        if isinstance(value, list):
+            raw_items = value
+        else:
+            raw_items = [value]
+
+        candidates: List[str] = []
+        for item in raw_items:
+            normalized = self._coerce_non_empty_text(item)
+            if not normalized:
+                continue
+
+            parts = re.split(r'[，,、;；/\n]+', normalized)
+            if not parts:
+                parts = [normalized]
+
+            for part in parts:
+                candidate = part.strip()
+                candidate = re.sub(r'^[甲乙丙丁]方[:：\s]*', '', candidate)
+                candidate = candidate.strip("（）() ")
+                if candidate:
+                    candidates.append(candidate)
+
+        for name in candidates:
+            for entity in CHINASOFT_ENTITY_NAMES:
+                if entity in name:
+                    return entity
+
+        for name in candidates:
+            if '中软国际' in name or 'Chinasoft' in name:
+                return name
+
+        return None
     
     def _generate_metadata_vector(self, metadata: Dict[str, Any]) -> Optional[np.ndarray]:
         """
@@ -314,10 +404,10 @@ CONTRACT_TEXT_PLACEHOLDER
             metadata_text_parts = []
             
             # 按重要性顺序拼接字段
-            if metadata.get('party_a'):
-                metadata_text_parts.append(f"甲方：{metadata['party_a']}")
-            if metadata.get('party_b'):
-                metadata_text_parts.append(f"乙方：{metadata['party_b']}")
+            if metadata.get('customer_name'):
+                metadata_text_parts.append(f"客户名称：{metadata['customer_name']}")
+            if metadata.get('our_entity'):
+                metadata_text_parts.append(f"中软国际实体：{metadata['our_entity']}")
             if metadata.get('contract_type'):
                 metadata_text_parts.append(f"合同方向：{metadata['contract_type']}")
             if metadata.get('contract_amount'):
@@ -493,8 +583,8 @@ CONTRACT_TEXT_PLACEHOLDER
     def _merge_metadata_results(self, metadata_results: List[Dict[str, Any]]) -> Dict[str, Any]:
         """根据预设规则合并多个元数据结果"""
         required_fields = [
-            'party_a',
-            'party_b',
+            'customer_name',
+            'our_entity',
             'contract_type',
             'contract_amount',
             'signing_date',
@@ -509,7 +599,7 @@ CONTRACT_TEXT_PLACEHOLDER
             merged_metadata['extracted_at'] = datetime.now().isoformat()
             return merged_metadata
 
-        first_value_fields = ['party_a', 'party_b', 'contract_type']
+        first_value_fields = ['customer_name', 'our_entity', 'contract_type']
         for field in first_value_fields:
             for item in metadata_results:
                 value = self._coerce_non_empty_text(item.get(field))
@@ -530,6 +620,8 @@ CONTRACT_TEXT_PLACEHOLDER
         for field in text_concat_fields:
             merged_metadata[field] = self._merge_text_field(metadata_results, field)
 
+        merged_metadata['customer_name'] = self._normalize_customer_name(merged_metadata.get('customer_name'))
+        merged_metadata['our_entity'] = self._normalize_chinasoft_entity(merged_metadata.get('our_entity'))
         merged_metadata['extracted_at'] = datetime.now().isoformat()
         return merged_metadata
 
@@ -633,7 +725,7 @@ if __name__ == "__main__":
     软件开发外包合同
     
     甲方：北京科技有限公司
-    乙方：上海软件开发有限公司
+    乙方：北京中软国际信息技术有限公司
     
     根据《中华人民共和国合同法》等相关法律法规，甲乙双方就软件开发项目达成如下协议：
     

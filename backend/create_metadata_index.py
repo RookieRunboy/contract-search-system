@@ -27,7 +27,7 @@ es.indices.create(
                 },
                 "metadata": {
                     "properties": {
-                        "party_a": {
+                        "customer_name": {
                             "type": "text",
                             "fields": {
                                 "keyword": {
@@ -35,7 +35,7 @@ es.indices.create(
                                 }
                             }
                         },
-                        "party_b": {
+                        "our_entity": {
                             "type": "text",
                             "fields": {
                                 "keyword": {
@@ -76,8 +76,8 @@ es.indices.create(
 
 print(f"成功创建元数据索引: {index_name}")
 print("索引映射只包含6个必要的元数据字段：")
-print("- party_a (甲方)")
-print("- party_b (乙方)")
+print("- customer_name (客户名称)")
+print("- our_entity (中软国际实体)")
 print("- contract_type (合同类型)")
 print("- contract_amount (合同金额)")
 print("- project_description (项目描述)")

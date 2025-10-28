@@ -56,11 +56,11 @@ UNIFIED_MAPPING = {
             },
             "document_metadata": {
                 "properties": {
-                    "party_a": {
+                    "customer_name": {
                         "type": "text",
                         "fields": {"keyword": {"type": "keyword"}}
                     },
-                    "party_b": {
+                    "our_entity": {
                         "type": "text",
                         "fields": {"keyword": {"type": "keyword"}}
                     },
@@ -121,10 +121,10 @@ def create_index(force: bool = False) -> None:
     print("- 保持向量搜索和文本搜索能力")
     print()
     print("示例查询场景:")
-    print("1. 按甲方搜索：document_metadata.party_a.keyword:'甲方公司'")
+    print("1. 按客户搜索：document_metadata.customer_name.keyword:'客户公司'")
     print("2. 按金额范围：document_metadata.contract_amount:[100000 TO 2000000]")
-    print("3. 复合查询：甲方+内容关键词组合搜索")
-    print("4. 元数据聚合：按合同类型、甲方等维度统计")
+    print("3. 复合查询：客户+内容关键词组合搜索")
+    print("4. 元数据聚合：按合同类型、客户等维度统计")
     print()
     print("索引创建完成！")
 

@@ -39,7 +39,7 @@ export const uploadDocument = async (files: File | File[]): Promise<any> => {
 };
 
 // 文档搜索
-export const searchDocuments = async (query: string, topK: number = 5): Promise<ContractSearchResult[]> => {
+export const searchDocuments = async (query: string, topK: number = 99): Promise<ContractSearchResult[]> => {
   try {
     const response = await api.get('/document/search', {
       params: { query, top_k: topK }
@@ -71,7 +71,7 @@ export const searchDocumentsWithMetadata = async (
   queryContent?: string,
   queryMetadata?: string,
   searchMode: string = 'content',
-  topK: number = 5
+  topK: number = 99
 ): Promise<ContractSearchResult[]> => {
   try {
     const params: any = {

@@ -63,8 +63,8 @@ class JSONToElasticsearch:
             return False
 
         key_fields = [
-            'party_a',
-            'party_b',
+            'customer_name',
+            'our_entity',
             'contract_type',
             'contract_amount',
             'signing_date',
@@ -107,8 +107,8 @@ class JSONToElasticsearch:
             if pageId == 1:
                 document.update({
                     "document_metadata": {
-                        "party_a": None,
-                        "party_b": None,
+                        "customer_name": None,
+                        "our_entity": None,
                         "contract_type": None,
                         "contract_amount": None,
                         "signing_date": None,
@@ -151,8 +151,8 @@ class JSONToElasticsearch:
             metadata = metadata_result.get('metadata', {}) or {}
             update_data = {
                 "document_metadata": {
-                    "party_a": metadata.get('party_a'),
-                    "party_b": metadata.get('party_b'),
+                    "customer_name": metadata.get('customer_name'),
+                    "our_entity": metadata.get('our_entity'),
                     "contract_type": metadata.get('contract_type'),
                     "contract_amount": metadata.get('contract_amount'),
                     "signing_date": metadata.get('signing_date'),

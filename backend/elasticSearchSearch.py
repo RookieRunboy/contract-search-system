@@ -55,7 +55,8 @@ class ElasticsearchVectorSearch:
             amount_min: float = None,
             amount_max: float = None,
             date_start: str = None,
-            date_end: str = None
+            date_end: str = None,
+            our_entity_filter: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
         执行搜索
@@ -75,11 +76,11 @@ class ElasticsearchVectorSearch:
             搜索结果列表
         """
         if search_mode == "content":
-            return self._search_content(query_text, top_k, text_standard, text_ngram, vector_weight, fuzziness, amount_min, amount_max, date_start, date_end)
+            return self._search_content(query_text, top_k, text_standard, text_ngram, vector_weight, fuzziness, amount_min, amount_max, date_start, date_end, our_entity_filter)
         elif search_mode == "metadata":
-            return self._search_metadata(query_metadata, top_k, metadata_weight, fuzziness, amount_min, amount_max, date_start, date_end)
+            return self._search_metadata(query_metadata, top_k, metadata_weight, fuzziness, amount_min, amount_max, date_start, date_end, our_entity_filter)
         elif search_mode == "hybrid":
-            return self._search_hybrid(query_text, query_metadata, top_k, text_standard, text_ngram, vector_weight, metadata_weight, fuzziness, amount_min, amount_max, date_start, date_end)
+            return self._search_hybrid(query_text, query_metadata, top_k, text_standard, text_ngram, vector_weight, metadata_weight, fuzziness, amount_min, amount_max, date_start, date_end, our_entity_filter)
         else:
             raise ValueError(f"不支持的搜索模式: {search_mode}")
     
@@ -94,7 +95,8 @@ class ElasticsearchVectorSearch:
             amount_min: float = None,
             amount_max: float = None,
             date_start: str = None,
-            date_end: str = None
+            date_end: str = None,
+            our_entity_filter: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
         内容搜索（原有逻辑）
@@ -181,7 +183,7 @@ class ElasticsearchVectorSearch:
         try:
             results = self.es.search(index=self.index_name, body=body)
             processed_results = self._process_results(results)
-            return self._attach_metadata_info(processed_results)
+            return self._attach_metadata_info(processed_results, our_entity_filter)
         except Exception as e:
             print(f"搜索错误: {str(e)}")
             return []
@@ -195,7 +197,8 @@ class ElasticsearchVectorSearch:
             amount_min: float = None,
             amount_max: float = None,
             date_start: str = None,
-            date_end: str = None
+            date_end: str = None,
+            our_entity_filter: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
         元数据搜索
@@ -208,8 +211,8 @@ class ElasticsearchVectorSearch:
         
         # 构建元数据字段搜索
         metadata_fields = [
-            f"document_metadata.party_a^{metadata_weight}",
-            f"document_metadata.party_b^{metadata_weight}",
+            f"document_metadata.customer_name^{metadata_weight}",
+            f"document_metadata.our_entity^{metadata_weight}",
             f"document_metadata.project_description^{metadata_weight * 0.8}",
             f"document_metadata.contract_type^{metadata_weight * 0.7}",
             f"document_metadata.positions^{metadata_weight * 0.6}",
@@ -282,8 +285,8 @@ class ElasticsearchVectorSearch:
             },
             "highlight": {
                 "fields": {
-                    "document_metadata.party_a": {},
-                    "document_metadata.party_b": {},
+                    "document_metadata.customer_name": {},
+                    "document_metadata.our_entity": {},
                     "document_metadata.project_description": {},
                     "document_metadata.contract_type": {},
                     "document_metadata.positions": {},
@@ -296,7 +299,7 @@ class ElasticsearchVectorSearch:
         try:
             results = self.es.search(index=self.index_name, body=body)
             processed_results = self._process_metadata_results(results)
-            return self._attach_metadata_info(processed_results)
+            return self._attach_metadata_info(processed_results, our_entity_filter)
         except Exception as e:
             print(f"元数据搜索错误: {str(e)}")
             return []
@@ -314,7 +317,8 @@ class ElasticsearchVectorSearch:
             amount_min: float = None,
             amount_max: float = None,
             date_start: str = None,
-            date_end: str = None
+            date_end: str = None,
+            our_entity_filter: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
         混合搜索（内容 + 元数据）
@@ -324,12 +328,12 @@ class ElasticsearchVectorSearch:
         
         # 执行内容搜索
         if query_text:
-            content_results = self._search_content(query_text, top_k * 2, text_standard, text_ngram, vector_weight, fuzziness, amount_min, amount_max, date_start, date_end)
+            content_results = self._search_content(query_text, top_k * 2, text_standard, text_ngram, vector_weight, fuzziness, amount_min, amount_max, date_start, date_end, our_entity_filter)
         
         # 执行元数据搜索
         if query_metadata:
-            metadata_results = self._search_metadata(query_metadata, top_k * 2, metadata_weight, fuzziness, amount_min, amount_max, date_start, date_end)
-        
+            metadata_results = self._search_metadata(query_metadata, top_k * 2, metadata_weight, fuzziness, amount_min, amount_max, date_start, date_end, our_entity_filter)
+
         # 合并和重新排序结果
         return self._merge_results(content_results, metadata_results, top_k)
     
@@ -468,7 +472,7 @@ class ElasticsearchVectorSearch:
             processed_results.append(result)
         return processed_results
 
-    def _attach_metadata_info(self, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _attach_metadata_info(self, results: List[Dict[str, Any]], our_entity_filter: Optional[str] = None) -> List[Dict[str, Any]]:
         """为搜索结果补充合同元数据信息"""
         if not results:
             return results
@@ -483,6 +487,10 @@ class ElasticsearchVectorSearch:
             return results
 
         metadata_map = self._fetch_contract_metadata(contract_names)
+
+        normalized_filter = our_entity_filter.strip().lower() if isinstance(our_entity_filter, str) and our_entity_filter.strip() else None
+
+        filtered_results: List[Dict[str, Any]] = []
 
         for result in results:
             name = result.get('contract_name')
@@ -519,7 +527,31 @@ class ElasticsearchVectorSearch:
             if signing_date:
                 result['signing_date'] = signing_date
 
-        return results
+            if normalized_filter:
+                metadata_dict = metadata_info if isinstance(metadata_info, dict) else {}
+                entity_candidate = self._normalize_entity_name(metadata_dict.get('our_entity'))
+                if not entity_candidate:
+                    entity_candidate = self._normalize_entity_name(metadata_dict.get('party_b'))
+
+                if not entity_candidate or entity_candidate.lower() != normalized_filter:
+                    continue
+
+            filtered_results.append(result)
+
+        return filtered_results if normalized_filter else results
+
+    def _normalize_entity_name(self, value: Any) -> Optional[str]:
+        """规范化实体名称，支持列表/字符串输入"""
+        if value is None:
+            return None
+        if isinstance(value, list):
+            for item in value:
+                normalized = self._normalize_entity_name(item)
+                if normalized:
+                    return normalized
+            return None
+        candidate = str(value).strip()
+        return candidate or None
 
     def _fetch_contract_metadata(self, contract_names: set) -> Dict[str, Dict[str, Any]]:
         """

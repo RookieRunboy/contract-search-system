@@ -1,13 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Modal, Form, Input, Select, InputNumber, Button, message, Spin, DatePicker } from 'antd';
+import { Modal, Form, Input, InputNumber, Button, message, Spin, DatePicker } from 'antd';
 import { ExperimentOutlined } from '@ant-design/icons';
 import type { ContractMetadata } from '../types/index';
 import { saveMetadata, extractMetadata } from '../services/api';
 import dayjs from 'dayjs';
 
 const { TextArea } = Input;
-const { Option } = Select;
-
 interface MetadataEditModalProps {
   visible: boolean;
   onCancel: () => void;
@@ -29,6 +27,9 @@ const MetadataEditModal: React.FC<MetadataEditModalProps> = ({
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
   const [extracting, setExtracting] = useState(false);
+  const customerCategoryLevel1 = Form.useWatch('customer_category_level1', form);
+  const customerCategoryLevel2 = Form.useWatch('customer_category_level2', form);
+  const customerNameValue = Form.useWatch('customer_name', form);
 
   const normalizeTextValue = (value: unknown): string | null => {
     if (typeof value === 'string') {
@@ -70,7 +71,8 @@ const MetadataEditModal: React.FC<MetadataEditModalProps> = ({
       contract_name: filename,
       customer_name: metadata?.customer_name ?? '',
       our_entity: metadata?.our_entity ?? '',
-      contract_type: metadata?.contract_type ?? undefined,
+      customer_category_level1: metadata?.customer_category_level1 ?? '',
+      customer_category_level2: metadata?.customer_category_level2 ?? '',
       contract_amount: metadata?.contract_amount ?? null,
       signing_date: metadata?.signing_date ? dayjs(metadata.signing_date) : null,
       project_description: metadata?.project_description ?? '',
@@ -106,7 +108,9 @@ const MetadataEditModal: React.FC<MetadataEditModalProps> = ({
         contract_name: filename,
         customer_name: normalizeTextValue(values.customer_name),
         our_entity: normalizeTextValue(values.our_entity),
-        contract_type: values.contract_type ?? null,
+        customer_category_level1: normalizeTextValue(values.customer_category_level1) ?? null,
+        customer_category_level2: normalizeTextValue(values.customer_category_level2) ?? null,
+        contract_type: initialMetadata?.contract_type ?? null,
         contract_amount: normalizeAmountValue(values.contract_amount),
         signing_date: values.signing_date ? (values.signing_date as any).format('YYYY-MM-DD') : null,
         project_description: normalizeTextValue(values.project_description),
@@ -151,6 +155,8 @@ const MetadataEditModal: React.FC<MetadataEditModalProps> = ({
           contract_name: filename,
           customer_name: normalizeTextValue(response.data.metadata.customer_name),
           our_entity: normalizeTextValue(response.data.metadata.our_entity),
+          customer_category_level1: normalizeTextValue(response.data.metadata.customer_category_level1),
+          customer_category_level2: normalizeTextValue(response.data.metadata.customer_category_level2),
           contract_type: response.data.metadata.contract_type ?? null,
           contract_amount: normalizeAmountValue(response.data.metadata.contract_amount),
           signing_date: normalizeTextValue(rawSigningDate),
@@ -210,7 +216,8 @@ const MetadataEditModal: React.FC<MetadataEditModalProps> = ({
           form={form}
           layout="vertical"
           initialValues={{
-            contract_type: null,
+            customer_category_level1: null,
+            customer_category_level2: null,
           }}
         >
           <div className="grid grid-cols-2 gap-4">
@@ -227,16 +234,24 @@ const MetadataEditModal: React.FC<MetadataEditModalProps> = ({
             </Form.Item>
 
             <Form.Item
-              label="合同方向"
-              name="contract_type"
-              rules={[{ required: true, message: '请选择合同方向' }]}
+              label="客户分类（一级）"
+              name="customer_category_level1"
+              extra={
+                customerNameValue
+                  ? !customerCategoryLevel1 && !customerCategoryLevel2
+                    ? '未匹配到客户分类，请检查客户名称或更新白名单。'
+                    : '来自客户分类白名单，自动填充'
+                  : '填写客户名称后将自动匹配白名单'
+              }
             >
-              <Select placeholder="请选择合同方向">
-                <Option value="金融方向">金融方向</Option>
-                <Option value="互联网方向">互联网方向</Option>
-                <Option value="电信方向">电信方向</Option>
-                <Option value="其他">其他</Option>
-              </Select>
+              <Input placeholder="自动匹配客户分类一级" readOnly />
+            </Form.Item>
+
+            <Form.Item
+              label="客户分类（二级）"
+              name="customer_category_level2"
+            >
+              <Input placeholder="自动匹配客户分类二级" readOnly />
             </Form.Item>
 
             <Form.Item label="合同金额" name="contract_amount">

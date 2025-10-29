@@ -66,7 +66,9 @@ export interface ContractMetadata {
   our_entity: string | null; // 我方实体（中软国际）
   party_a?: string | null; // 兼容旧数据的甲方字段
   party_b?: string | null; // 兼容旧数据的乙方字段
-  contract_type: string | null; // 合同方向
+  customer_category_level1?: string | null; // 客户分类（一级）
+  customer_category_level2?: string | null; // 客户分类（二级）
+  contract_type?: string | null; // 旧版合同方向，保留兼容
   contract_amount: number | null; // 合同金额
   signing_date?: string | null; // 签订日期，YYYY-MM-DD
   project_description: string | null; // 项目描述
@@ -96,4 +98,6 @@ export interface SearchFilters {
   dateStart?: string; // YYYY-MM-DD格式
   dateEnd?: string; // YYYY-MM-DD格式
   ourEntity?: string | null;
+  customerCategoryLevel1?: string[];
+  customerCategoryLevel2?: string[];
 }

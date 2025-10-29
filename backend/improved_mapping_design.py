@@ -84,6 +84,12 @@ unified_mapping = {
                             }
                         }
                     },
+                    "customer_category_level1": {
+                        "type": "keyword"
+                    },
+                    "customer_category_level2": {
+                        "type": "keyword"
+                    },
                     "contract_type": {
                         "type": "keyword"
                     },
@@ -150,6 +156,8 @@ example_doc_page1 = {
     "document_metadata": {
         "customer_name": "甲方公司",
         "our_entity": "中软国际科技服务有限公司", 
+        "customer_category_level1": "金融行业",
+        "customer_category_level2": "银行",
         "contract_type": "技术服务合同",
         "contract_amount": 1000000.0,
         "project_description": "系统开发项目",
@@ -181,4 +189,4 @@ print("\n示例查询场景：")
 print("1. 按客户搜索：document_metadata.customer_name:'甲方公司'")
 print("2. 按金额范围：document_metadata.contract_amount:[100000 TO 2000000]")
 print("3. 复合查询：客户+内容关键词组合搜索")
-print("4. 元数据聚合：按合同类型、客户等维度统计")
+print("4. 元数据聚合：按客户分类、客户等维度统计")

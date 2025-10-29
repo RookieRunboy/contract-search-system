@@ -199,6 +199,8 @@ export interface SearchFilters {
   dateStart?: string;
   dateEnd?: string;
   ourEntity?: string | null;
+  customerCategoryLevel1?: string[];
+  customerCategoryLevel2?: string[];
 }
 
 export const searchDocuments = async (
@@ -224,6 +226,12 @@ export const searchDocuments = async (
   }
   if (filters?.ourEntity) {
     params.our_entity = filters.ourEntity;
+  }
+  if (filters?.customerCategoryLevel1 && filters.customerCategoryLevel1.length > 0) {
+    params.customer_category_level1 = filters.customerCategoryLevel1.join(',');
+  }
+  if (filters?.customerCategoryLevel2 && filters.customerCategoryLevel2.length > 0) {
+    params.customer_category_level2 = filters.customerCategoryLevel2.join(',');
   }
 
   // 改为 GET，并通过 query 参数传递

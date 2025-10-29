@@ -64,6 +64,8 @@ UNIFIED_MAPPING = {
                         "type": "text",
                         "fields": {"keyword": {"type": "keyword"}}
                     },
+                    "customer_category_level1": {"type": "keyword"},
+                    "customer_category_level2": {"type": "keyword"},
                     "contract_type": {"type": "keyword"},
                     "contract_amount": {"type": "double"},
                     "signing_date": {"type": "date"},
@@ -124,7 +126,7 @@ def create_index(force: bool = False) -> None:
     print("1. 按客户搜索：document_metadata.customer_name.keyword:'客户公司'")
     print("2. 按金额范围：document_metadata.contract_amount:[100000 TO 2000000]")
     print("3. 复合查询：客户+内容关键词组合搜索")
-    print("4. 元数据聚合：按合同类型、客户等维度统计")
+    print("4. 元数据聚合：按客户分类、客户等维度统计")
     print()
     print("索引创建完成！")
 

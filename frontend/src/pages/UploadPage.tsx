@@ -160,6 +160,14 @@ const parseContractAmount = (value: unknown): number | null => {
 };
 
 const normalizeContractMetadata = (raw: Record<string, unknown> | null | undefined, fileName: string): ContractMetadata => {
+  const categoryLevel1Raw = sanitizeTextValue(raw?.['customer_category_level1'])
+    ?? sanitizeTextValue(raw?.['customerCategoryLevel1'])
+    ?? sanitizeTextValue(raw?.['category_level1'])
+    ?? sanitizeTextValue(raw?.['categoryLevel1']);
+  const categoryLevel2Raw = sanitizeTextValue(raw?.['customer_category_level2'])
+    ?? sanitizeTextValue(raw?.['customerCategoryLevel2'])
+    ?? sanitizeTextValue(raw?.['category_level2'])
+    ?? sanitizeTextValue(raw?.['categoryLevel2']);
   const contractTypeRaw = sanitizeTextValue(raw?.['contract_type'])
     ?? sanitizeTextValue(raw?.['contractType'])
     ?? sanitizeTextValue(raw?.['customer_type'])
@@ -189,6 +197,8 @@ const normalizeContractMetadata = (raw: Record<string, unknown> | null | undefin
     contract_name: fileName,
     customer_name: sanitizeTextValue(customerNameRaw),
     our_entity: sanitizeTextValue(ourEntityRaw),
+    customer_category_level1: categoryLevel1Raw,
+    customer_category_level2: categoryLevel2Raw,
     contract_type: contractTypeRaw,
     contract_amount: parseContractAmount(contractAmountRaw),
     signing_date: signingDateRaw,
@@ -199,22 +209,9 @@ const normalizeContractMetadata = (raw: Record<string, unknown> | null | undefin
   };
 };
 
-const formatContractTypeLabel = (contractType?: string | null): string => {
-  if (!contractType) {
-    return '未分类';
-  }
-  switch (contractType) {
-    case '金融方向':
-      return '金融方向';
-    case '互联网方向':
-      return '互联网方向';
-    case '电信方向':
-      return '电信方向';
-    case '其他':
-      return '其他';
-    default:
-      return contractType;
-  }
+const formatCustomerCategory = (level1?: string | null, level2?: string | null): string => {
+  const parts = [level1, level2].filter((part): part is string => Boolean(part));
+  return parts.length > 0 ? parts.join(' / ') : '未匹配';
 };
 
 const formatAmountDisplay = (amount?: number | null): string => {
@@ -262,6 +259,8 @@ interface DocumentDetail {
     our_entity?: string;
     party_a?: string;
     party_b?: string;
+    customer_category_level1?: string;
+    customer_category_level2?: string;
     contract_type?: string;
     contract_amount?: number;
     contract_content_summary?: string;
@@ -734,7 +733,12 @@ const UploadPage: FC = () => {
                   <Descriptions.Item label="我方实体">
                     {detailMetadata.our_entity ?? detailMetadata.party_b ?? '-'}
                   </Descriptions.Item>
-                  <Descriptions.Item label="合同方向">{formatContractTypeLabel(detailMetadata.contract_type)}</Descriptions.Item>
+                  <Descriptions.Item label="客户分类">
+                    {formatCustomerCategory(
+                      detailMetadata.customer_category_level1 ?? detailMetadata.contract_type,
+                      detailMetadata.customer_category_level2 ?? undefined
+                    )}
+                  </Descriptions.Item>
                   <Descriptions.Item label="合同金额">{formatAmountDisplay(detailMetadata.contract_amount)}</Descriptions.Item>
                   <Descriptions.Item label="签订日期">{formatDateDisplay(detailMetadata.signing_date)}</Descriptions.Item>
                   <Descriptions.Item label="岗位信息" span={2}>{detailMetadata.positions ?? '-'}</Descriptions.Item>

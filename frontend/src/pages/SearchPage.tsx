@@ -42,6 +42,8 @@ const SearchPage: FC = () => {
   const [amountMin, setAmountMin] = useState<number | null>(null);
   const [amountMax, setAmountMax] = useState<number | null>(null);
   const [ourEntityFilter, setOurEntityFilter] = useState<string | null>(null);
+  const [customerCategoryLevel1Filter, setCustomerCategoryLevel1Filter] = useState<string[]>([]);
+  const [customerCategoryLevel2Filter, setCustomerCategoryLevel2Filter] = useState<string[]>([]);
 
 
   const handleSearch = async () => {
@@ -66,6 +68,12 @@ const SearchPage: FC = () => {
       }
       if (ourEntityFilter) {
         filters.ourEntity = ourEntityFilter;
+      }
+      if (customerCategoryLevel1Filter.length > 0) {
+        filters.customerCategoryLevel1 = customerCategoryLevel1Filter;
+      }
+      if (customerCategoryLevel2Filter.length > 0) {
+        filters.customerCategoryLevel2 = customerCategoryLevel2Filter;
       }
 
       const results = await searchDocuments(searchQuery, topK, filters);
@@ -147,6 +155,13 @@ const SearchPage: FC = () => {
       return Number.isNaN(parsed) ? null : parsed;
     }
     return null;
+  };
+
+  const normalizeTagValues = (values: (string | number)[]): string[] => {
+    const normalized = values
+      .map((item) => (typeof item === 'string' ? item.trim() : String(item).trim()))
+      .filter((item): item is string => item.length > 0);
+    return Array.from(new Set(normalized));
   };
 
   const formatAmountDisplay = (amount: number | null): string => {
@@ -574,6 +589,42 @@ const SearchPage: FC = () => {
                       options={CHINASOFT_ENTITY_NAMES.map((name) => ({ label: name, value: name }))}
                     />
                   </Col>
+                  <Col xs={24} sm={12}>
+                    <div style={{ marginBottom: '8px' }}>
+                      <Typography.Text strong>客户分类（一级）</Typography.Text>
+                    </div>
+                    <Select
+                      mode="tags"
+                      allowClear
+                      placeholder="请输入或选择客户分类一级"
+                      style={{ width: '100%' }}
+                      value={customerCategoryLevel1Filter}
+                      onChange={(values) => {
+                        const normalized = normalizeTagValues(values);
+                        setCustomerCategoryLevel1Filter(normalized);
+                      }}
+                      tokenSeparators={[',', '，', ';', '；', ' ']}
+                      options={customerCategoryLevel1Filter.map((value) => ({ label: value, value }))}
+                    />
+                  </Col>
+                  <Col xs={24} sm={12}>
+                    <div style={{ marginBottom: '8px' }}>
+                      <Typography.Text strong>客户分类（二级）</Typography.Text>
+                    </div>
+                    <Select
+                      mode="tags"
+                      allowClear
+                      placeholder="请输入或选择客户分类二级"
+                      style={{ width: '100%' }}
+                      value={customerCategoryLevel2Filter}
+                      onChange={(values) => {
+                        const normalized = normalizeTagValues(values);
+                        setCustomerCategoryLevel2Filter(normalized);
+                      }}
+                      tokenSeparators={[',', '，', ';', '；', ' ']}
+                      options={customerCategoryLevel2Filter.map((value) => ({ label: value, value }))}
+                    />
+                  </Col>
                 </Row>
                 
                 <div style={{ marginTop: '12px', textAlign: 'right' }}>
@@ -585,6 +636,8 @@ const SearchPage: FC = () => {
                       setAmountMax(null);
                       setTopK(99);
                       setOurEntityFilter(null);
+                      setCustomerCategoryLevel1Filter([]);
+                      setCustomerCategoryLevel2Filter([]);
                     }}
                     style={{ marginRight: '8px' }}
                   >
@@ -811,14 +864,23 @@ const SearchPage: FC = () => {
                                </Text>
                              </div>
                            )}
-                           {contract.metadata_info.contract_type && (
+                           {(contract.metadata_info.customer_category_level1 || contract.metadata_info.customer_category_level2 || contract.metadata_info.contract_type) && (
                              <div>
-                               <Text type="secondary">合同方向：</Text>
+                               <Text type="secondary">客户分类：</Text>
                                <Text>
-                                 {highlightMetadataText(
-                                   contract.metadata_info.contract_type, 
-                                   getMetadataHighlights(contract, 'contract_type')
-                                 )}
+                                 {(() => {
+                                   const parts = [
+                                     contract.metadata_info.customer_category_level1 ?? contract.metadata_info.contract_type,
+                                     contract.metadata_info.customer_category_level2 || undefined,
+                                   ].filter((item): item is string => Boolean(item));
+                                   const text = parts.length > 0 ? parts.join(' / ') : '未匹配';
+                                   const highlights = Array.from(new Set([
+                                     ...getMetadataHighlights(contract, 'customer_category_level1'),
+                                     ...getMetadataHighlights(contract, 'customer_category_level2'),
+                                     ...getMetadataHighlights(contract, 'contract_type'),
+                                   ]));
+                                   return highlightMetadataText(text, highlights);
+                                 })()}
                                </Text>
                              </div>
                            )}

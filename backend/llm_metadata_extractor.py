@@ -2,9 +2,10 @@ import requests
 import json
 import time
 import re
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional, Set, Tuple
 from datetime import datetime
 import os
+from pathlib import Path
 import numpy as np
 
 CHINASOFT_ENTITY_NAMES: List[str] = [
@@ -18,8 +19,13 @@ CHINASOFT_ENTITY_NAMES: List[str] = [
     "Chinasoft International Technology Service (Hong Kong) Limited",
 ]
 
+DEFAULT_CUSTOMER_CATEGORY_PATH = Path.home() / (
+    "Library/Containers/com.huawei.cloud.welink/Data/IM/0000439732@csi/ReceiveFiles/金融客户白名单.xlsx"
+)
+
 from document_processor import DocumentProcessor
 from embedding_client import RemoteEmbeddingClient
+from customer_category_loader import CustomerCategoryLookup
 
 class MetadataExtractor:
     def __init__(self, api_key: Optional[str] = None):
@@ -44,6 +50,28 @@ class MetadataExtractor:
         except Exception as e:
             print(f"向量服务初始化失败: {e}")
             self.vector_client = None
+
+        mapping_path_env = os.getenv("CUSTOMER_CATEGORY_MAPPING_PATH")
+        if mapping_path_env:
+            mapping_path = Path(mapping_path_env).expanduser()
+        elif DEFAULT_CUSTOMER_CATEGORY_PATH.exists():
+            mapping_path = DEFAULT_CUSTOMER_CATEGORY_PATH
+        else:
+            mapping_path = None
+
+        if mapping_path:
+            print(f"使用客户分类白名单: {mapping_path}")
+            mapping_path_str: Optional[str] = str(mapping_path)
+        else:
+            print(
+                "提示: 未检测到客户分类白名单文件，客户分类元数据将保持为空。"
+                " 可通过环境变量 CUSTOMER_CATEGORY_MAPPING_PATH 指定 Excel 路径。"
+            )
+            mapping_path_str = None
+
+        self.customer_category_lookup = CustomerCategoryLookup(mapping_path_str)
+        self._customer_category_lookup_enabled = mapping_path_str is not None
+        self._unmatched_customer_names: Set[str] = set()
     
     def _get_prompt_template(self, contract_type: str = "unknown") -> str:
         """
@@ -272,8 +300,16 @@ CONTRACT_TEXT_PLACEHOLDER
         """
         # 定义精简的字段列表（包含用户要求的8个字段）
         required_fields = [
-            'customer_name', 'our_entity', 'contract_type', 'contract_amount',
-            'signing_date', 'project_description', 'positions', 'personnel_list'
+            'customer_name',
+            'our_entity',
+            'contract_type',
+            'customer_category_level1',
+            'customer_category_level2',
+            'contract_amount',
+            'signing_date',
+            'project_description',
+            'positions',
+            'personnel_list',
         ]
         
         # 创建清理后的字典
@@ -295,6 +331,8 @@ CONTRACT_TEXT_PLACEHOLDER
 
         cleaned_metadata['customer_name'] = self._normalize_customer_name(cleaned_metadata.get('customer_name'))
         cleaned_metadata['our_entity'] = self._normalize_chinasoft_entity(cleaned_metadata.get('our_entity'))
+
+        self._enrich_customer_category(cleaned_metadata)
 
         # 添加提取时间戳
         cleaned_metadata['extracted_at'] = datetime.now().isoformat()
@@ -384,6 +422,31 @@ CONTRACT_TEXT_PLACEHOLDER
                 return name
 
         return None
+
+    def _enrich_customer_category(self, metadata: Dict[str, Any]) -> None:
+        """根据客户名称补齐客户一级/二级分类，并清理旧字段。"""
+        customer_name = metadata.get('customer_name')
+
+        if not customer_name:
+            level1 = None
+            level2 = None
+        else:
+            level1, level2 = self.customer_category_lookup.lookup(customer_name)
+
+        metadata['customer_category_level1'] = level1
+        metadata['customer_category_level2'] = level2
+
+        if (
+            level1 is None
+            and level2 is None
+            and customer_name
+            and self._customer_category_lookup_enabled
+            and customer_name not in self._unmatched_customer_names
+        ):
+            print(f"客户分类白名单未匹配：{customer_name}")
+            self._unmatched_customer_names.add(customer_name)
+
+        metadata['contract_type'] = None
     
     def _generate_metadata_vector(self, metadata: Dict[str, Any]) -> Optional[np.ndarray]:
         """
@@ -408,8 +471,15 @@ CONTRACT_TEXT_PLACEHOLDER
                 metadata_text_parts.append(f"客户名称：{metadata['customer_name']}")
             if metadata.get('our_entity'):
                 metadata_text_parts.append(f"中软国际实体：{metadata['our_entity']}")
-            if metadata.get('contract_type'):
-                metadata_text_parts.append(f"合同方向：{metadata['contract_type']}")
+            category_parts = [
+                part for part in (
+                    metadata.get('customer_category_level1'),
+                    metadata.get('customer_category_level2'),
+                )
+                if part
+            ]
+            if category_parts:
+                metadata_text_parts.append(f"客户分类：{' / '.join(category_parts)}")
             if metadata.get('contract_amount'):
                 metadata_text_parts.append(f"合同金额：{metadata['contract_amount']}元")
             if metadata.get('signing_date'):
@@ -585,6 +655,8 @@ CONTRACT_TEXT_PLACEHOLDER
         required_fields = [
             'customer_name',
             'our_entity',
+            'customer_category_level1',
+            'customer_category_level2',
             'contract_type',
             'contract_amount',
             'signing_date',
@@ -599,7 +671,13 @@ CONTRACT_TEXT_PLACEHOLDER
             merged_metadata['extracted_at'] = datetime.now().isoformat()
             return merged_metadata
 
-        first_value_fields = ['customer_name', 'our_entity', 'contract_type']
+        first_value_fields = [
+            'customer_name',
+            'our_entity',
+            'customer_category_level1',
+            'customer_category_level2',
+            'contract_type',
+        ]
         for field in first_value_fields:
             for item in metadata_results:
                 value = self._coerce_non_empty_text(item.get(field))

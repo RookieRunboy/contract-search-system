@@ -65,7 +65,8 @@ class JSONToElasticsearch:
         key_fields = [
             'customer_name',
             'our_entity',
-            'contract_type',
+            'customer_category_level1',
+            'customer_category_level2',
             'contract_amount',
             'signing_date',
             'project_description',
@@ -109,6 +110,8 @@ class JSONToElasticsearch:
                     "document_metadata": {
                         "customer_name": None,
                         "our_entity": None,
+                        "customer_category_level1": None,
+                        "customer_category_level2": None,
                         "contract_type": None,
                         "contract_amount": None,
                         "signing_date": None,
@@ -153,6 +156,8 @@ class JSONToElasticsearch:
                 "document_metadata": {
                     "customer_name": metadata.get('customer_name'),
                     "our_entity": metadata.get('our_entity'),
+                    "customer_category_level1": metadata.get('customer_category_level1'),
+                    "customer_category_level2": metadata.get('customer_category_level2'),
                     "contract_type": metadata.get('contract_type'),
                     "contract_amount": metadata.get('contract_amount'),
                     "signing_date": metadata.get('signing_date'),
@@ -318,7 +323,51 @@ class PdfToElasticsearch:
             status_callback("parsing", {})
 
         contract_json = self.pdfExtractor.extract_text(contents, contract_name)
+
+        if not isinstance(contract_json, list) or not contract_json:
+            if status_callback:
+                status_callback(
+                    "failed",
+                    {
+                        "error": "未识别到任何页面内容",
+                    },
+                )
+            raise RuntimeError("PDF 解析失败：未返回任何页面内容")
+
         total_pages = len(contract_json)
+
+        error_pages = []
+        for page in contract_json:
+            text_value = ""
+            if isinstance(page, dict):
+                text_value = str(page.get("text", "") or "")
+            else:
+                text_value = str(page)
+
+            if text_value.strip().lower().startswith("error"):
+                error_pages.append(page)
+
+        if error_pages:
+            first_error = error_pages[0]
+            error_text_raw = ""
+            if isinstance(first_error, dict):
+                error_text_raw = str(first_error.get("text", "") or "")
+            else:
+                error_text_raw = str(first_error)
+
+            error_message = error_text_raw.split(":", 1)[-1].strip() if ":" in error_text_raw else error_text_raw
+
+            if status_callback:
+                status_callback(
+                    "failed",
+                    {
+                        "error": f"页面解析失败: {error_message or '模型未返回结果'}",
+                        "total_pages": total_pages,
+                        "processed_pages": total_pages - len(error_pages),
+                    },
+                )
+
+            raise RuntimeError(f"PDF 解析失败：共有 {len(error_pages)} 页解析错误")
 
         if status_callback:
             status_callback(

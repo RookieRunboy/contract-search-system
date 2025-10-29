@@ -43,6 +43,12 @@ es.indices.create(
                                 }
                             }
                         },
+                        "customer_category_level1": {
+                            "type": "keyword"
+                        },
+                        "customer_category_level2": {
+                            "type": "keyword"
+                        },
                         "contract_type": {
                             "type": "keyword"
                         },
@@ -75,10 +81,12 @@ es.indices.create(
 )
 
 print(f"成功创建元数据索引: {index_name}")
-print("索引映射只包含6个必要的元数据字段：")
+print("索引映射包含主要的元数据字段：")
 print("- customer_name (客户名称)")
 print("- our_entity (中软国际实体)")
-print("- contract_type (合同类型)")
+print("- customer_category_level1 (客户分类一级)")
+print("- customer_category_level2 (客户分类二级)")
+print("- contract_type (合同方向，保留兼容)")
 print("- contract_amount (合同金额)")
 print("- project_description (项目描述)")
 print("- positions (岗位)")

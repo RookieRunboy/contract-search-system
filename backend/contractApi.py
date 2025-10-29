@@ -74,7 +74,8 @@ def _metadata_has_values(metadata: Optional[Dict[str, Any]]) -> bool:
     key_fields = [
         'customer_name',
         'our_entity',
-        'contract_type',
+        'customer_category_level1',
+        'customer_category_level2',
         'contract_amount',
         'signing_date',
         'project_description',
@@ -518,10 +519,20 @@ async def delete_by_filename(filename: str = Query(..., description="要删除�
         result = await run_in_threadpool(es_deleter.delete_by_filename, filename)
 
         if result['status'] == 'success':
+            status_removed = 0
+            try:
+                normalized = result.get('normalized_filename') or filename
+                status_removed = status_manager.remove_records_for_contract(normalized)
+            except Exception as cleanup_exc:  # noqa: BLE001
+                print(f"WARNING: 删除上传状态记录失败 {filename}: {cleanup_exc}")
+
             return {
                 "code": 200,
                 "message": "文档删除成功",
-                "data": result
+                "data": {
+                    **result,
+                    "status_records_deleted": status_removed,
+                }
             }
         else:
             return {
@@ -550,6 +561,8 @@ async def search_documents(
         date_start: Optional[str] = Query(default=None, description="合同签订开始日期 (YYYY-MM-DD)"),
         date_end: Optional[str] = Query(default=None, description="合同签订结束日期 (YYYY-MM-DD)"),
         our_entity: Optional[str] = Query(default=None, description="我方实体名称（中软国际）"),
+        customer_category_level1: Optional[str] = Query(default=None, description="客户分类一级（逗号分隔或多次传参）"),
+        customer_category_level2: Optional[str] = Query(default=None, description="客户分类二级（逗号分隔或多次传参）"),
         # 其他参数保持不变
         top_k: Optional[int] = Query(default=99, description="返回结果数量"),
         text_standard: Optional[int] = Query(default=3, description="标准文本权重"),
@@ -628,6 +641,17 @@ async def search_documents(
         if date_start is not None and date_end is not None and date_start > date_end:
             raise HTTPException(status_code=400, detail="date_start 不能晚于 date_end")
 
+        def _parse_category_param(value: Optional[str]) -> Optional[List[str]]:
+            if value is None:
+                return None
+            if isinstance(value, str):
+                items = [item.strip() for item in value.split(',') if item and item.strip()]
+                return items or None
+            return None
+
+        category_level1_list = _parse_category_param(customer_category_level1)
+        category_level2_list = _parse_category_param(customer_category_level2)
+
         # 调用新的搜索接口
         results = await run_in_threadpool(
             es_searcher.search,
@@ -644,7 +668,9 @@ async def search_documents(
             amount_max=amount_max,
             date_start=date_start,
             date_end=date_end,
-            our_entity_filter=our_entity
+            our_entity_filter=our_entity,
+            category_level1_filter=category_level1_list,
+            category_level2_filter=category_level2_list
         )
 
         return {
@@ -675,6 +701,8 @@ async def search_alias(
         date_start: Optional[str] = Query(default=None, description="合同签订开始日期 (YYYY-MM-DD)"),
         date_end: Optional[str] = Query(default=None, description="合同签订结束日期 (YYYY-MM-DD)"),
         our_entity: Optional[str] = Query(default=None, description="我方实体名称（中软国际）"),
+        customer_category_level1: Optional[str] = Query(default=None, description="客户分类一级（逗号分隔或多次传参）"),
+        customer_category_level2: Optional[str] = Query(default=None, description="客户分类二级（逗号分隔或多次传参）"),
         # 其他参数保持不变
         top_k: Optional[int] = Query(default=99, description="返回结果数量"),
         text_standard: Optional[int] = Query(default=3, description="标准文本权重"),
@@ -693,6 +721,8 @@ async def search_alias(
         date_start=date_start,
         date_end=date_end,
         our_entity=our_entity,
+        customer_category_level1=customer_category_level1,
+        customer_category_level2=customer_category_level2,
         top_k=top_k,
         text_standard=text_standard,
         text_ngram=text_ngram,
@@ -827,7 +857,8 @@ async def get_document_detail(document_name: str):
         has_metadata_flag = False
         if isinstance(document_metadata, dict) and document_metadata:
             key_fields = [
-                'customer_name', 'our_entity', 'contract_type', 'contract_amount',
+                'customer_name', 'our_entity', 'customer_category_level1',
+                'customer_category_level2', 'contract_amount',
                 'project_description', 'positions', 'personnel_list'
             ]
             has_metadata_flag = any(_is_non_empty(document_metadata.get(k)) for k in key_fields)
@@ -883,11 +914,21 @@ async def delete_document(document_name: str):
         result = await run_in_threadpool(es_deleter.delete_by_filename, document_name)
         
         if result['status'] == 'success':
+            status_removed = 0
+            try:
+                normalized = result.get('normalized_filename') or document_name
+                status_removed = status_manager.remove_records_for_contract(normalized)
+            except Exception as cleanup_exc:  # noqa: BLE001
+                print(f"WARNING: 删除上传状态记录失败 {document_name}: {cleanup_exc}")
+
             return {
                 "success": True,
                 "message": f"文档 {document_name} 已删除",
                 "deleted_chunks": result.get('deleted_count', 0),
-                "data": result
+                "data": {
+                    **result,
+                    "status_records_deleted": status_removed,
+                }
             }
         else:
             return {
@@ -1128,6 +1169,8 @@ async def save_metadata(request: dict):
         metadata_update = {
             "customer_name": metadata.get('customer_name'),
             "our_entity": metadata.get('our_entity'),
+            "customer_category_level1": metadata.get('customer_category_level1'),
+            "customer_category_level2": metadata.get('customer_category_level2'),
             "contract_type": metadata.get('contract_type'),
             "contract_amount": metadata.get('contract_amount'),
             "signing_date": metadata.get('signing_date'),

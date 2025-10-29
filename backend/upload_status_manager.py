@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from elasticsearch import Elasticsearch, exceptions as es_exceptions
@@ -170,3 +171,37 @@ class UploadStatusManager:
             results.append(source)
         return results
 
+    def remove_records_for_contract(self, name_or_filename: str) -> int:
+        """删除指定合同名称相关的上传状态记录。"""
+
+        if not name_or_filename:
+            return 0
+
+        normalized = Path(name_or_filename).name
+        if normalized.lower().endswith('.pdf'):
+            normalized = normalized[:-4]
+
+        if not normalized:
+            return 0
+
+        query = {
+            "query": {
+                "term": {
+                    "contract_name": normalized
+                }
+            }
+        }
+
+        try:
+            response = self.es.delete_by_query(
+                index=self.index_name,
+                body=query,
+                refresh=True,
+                conflicts="proceed",
+            )
+            return int(response.get("deleted", 0))
+        except es_exceptions.NotFoundError:
+            return 0
+        except Exception as exc:  # noqa: BLE001
+            print(f"WARNING: 删除上传状态记录失败 {normalized}: {exc}")
+            return 0

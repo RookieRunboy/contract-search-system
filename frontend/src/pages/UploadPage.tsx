@@ -17,6 +17,7 @@ import {
   Divider,
   Collapse,
   Spin,
+  Modal,
 } from 'antd';
 import {
   InboxOutlined,
@@ -287,6 +288,7 @@ const UploadPage: FC = () => {
   const [detailLoading, setDetailLoading] = useState<boolean>(false);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [detailData, setDetailData] = useState<DocumentDetail | null>(null);
+  const [detailModalVisible, setDetailModalVisible] = useState(false);
   const [deletePopoverKey, setDeletePopoverKey] = useState<string | null>(null);
   const [deleteLoadingKey, setDeleteLoadingKey] = useState<string | null>(null);
 
@@ -378,6 +380,7 @@ const UploadPage: FC = () => {
 
   const showDetail = async (record: DocumentRecord) => {
     setSelectedContractKey(record.contractKey);
+    setDetailModalVisible(true);
     setDetailLoading(true);
     setDetailError(null);
     setDetailData(null);
@@ -397,6 +400,14 @@ const UploadPage: FC = () => {
     } finally {
       setDetailLoading(false);
     }
+  };
+
+  const handleCloseDetailModal = () => {
+    setDetailModalVisible(false);
+    setSelectedContractKey(null);
+    setDetailLoading(false);
+    setDetailError(null);
+    setDetailData(null);
   };
 
   // 删除文档
@@ -707,78 +718,85 @@ const UploadPage: FC = () => {
 
   return (
     <div style={{ padding: '24px' }}>
-      {/* 详情展示区域：顶部显示合同名称，中部按顺序展示 */}
-      {selectedContractKey && (
-        <Card style={{ marginBottom: 24 }}>
-          {detailLoading ? (
-            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 120 }}>
-              <Spin tip="加载合同详情中..." />
-            </div>
-          ) : detailError ? (
-            <Text type="danger">{detailError}</Text>
-          ) : detailData ? (
-            <div>
-              {/* 页面顶部：完整显示合同名称 */}
-              <Title level={3} style={{ marginTop: 0, marginBottom: 12 }}>
-                {detailData.contract_name}
-              </Title>
+      <Modal
+        title="合同详情"
+        open={detailModalVisible}
+        onCancel={handleCloseDetailModal}
+        footer={null}
+        width={960}
+        destroyOnClose
+        bodyStyle={{ maxHeight: '70vh', overflowY: 'auto' }}
+      >
+        {detailLoading ? (
+          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 120 }}>
+            <Spin tip="加载合同详情中..." />
+          </div>
+        ) : detailError ? (
+          <Text type="danger">{detailError}</Text>
+        ) : detailData ? (
+          <div>
+            {/* 页面顶部：完整显示合同名称 */}
+            <Title level={3} style={{ marginTop: 0, marginBottom: 12 }}>
+              {detailData.contract_name}
+            </Title>
 
-              {/* 中部 1：合同所有元数据信息 */}
-              <Divider orientation="left">合同元数据信息</Divider>
-              {detailMetadataReady && detailMetadata ? (
-                <Descriptions bordered size="small" column={2}>
-                  <Descriptions.Item label="客户名称">
-                    {detailMetadata.customer_name ?? detailMetadata.party_a ?? '-'}
-                  </Descriptions.Item>
-                  <Descriptions.Item label="我方实体">
-                    {detailMetadata.our_entity ?? detailMetadata.party_b ?? '-'}
-                  </Descriptions.Item>
-                  <Descriptions.Item label="客户分类">
-                    {formatCustomerCategory(
-                      detailMetadata.customer_category_level1 ?? detailMetadata.contract_type,
-                      detailMetadata.customer_category_level2 ?? undefined
-                    )}
-                  </Descriptions.Item>
-                  <Descriptions.Item label="合同金额">{formatAmountDisplay(detailMetadata.contract_amount)}</Descriptions.Item>
-                  <Descriptions.Item label="签订日期">{formatDateDisplay(detailMetadata.signing_date)}</Descriptions.Item>
-                  <Descriptions.Item label="岗位信息" span={2}>{detailMetadata.positions ?? '-'}</Descriptions.Item>
-                  <Descriptions.Item label="人员清单" span={2}>{detailMetadata.personnel_list ?? '-'}</Descriptions.Item>
-                  <Descriptions.Item label="合同内容" span={2}>
-                    <Paragraph style={{ marginBottom: 0 }}>{detailMetadata.project_description ?? '-'}</Paragraph>
-                  </Descriptions.Item>
-                  <Descriptions.Item label="提取时间">{formatDateTimeDisplay(detailMetadata.extracted_at)}</Descriptions.Item>
-                </Descriptions>
-              ) : (
-                <Text type="secondary">暂无已保存的元数据信息</Text>
-              )}
-
-              {/* 中部 2：合同总页数、上传时间 */}
-              <Divider orientation="left">文档信息</Divider>
-              <Descriptions size="small" column={3}>
-                <Descriptions.Item label="总页数">{detailData.totalPages ?? '-'}</Descriptions.Item>
-                <Descriptions.Item label="上传时间">{detailData.uploadTime ?? '-'}</Descriptions.Item>
-                <Descriptions.Item label="文件大小">{detailData.fileSize ?? '-'}</Descriptions.Item>
+            {/* 中部 1：合同所有元数据信息 */}
+            <Divider orientation="left">合同元数据信息</Divider>
+            {detailMetadataReady && detailMetadata ? (
+              <Descriptions bordered size="small" column={2}>
+                <Descriptions.Item label="客户名称">
+                  {detailMetadata.customer_name ?? detailMetadata.party_a ?? '-'}
+                </Descriptions.Item>
+                <Descriptions.Item label="我方实体">
+                  {detailMetadata.our_entity ?? detailMetadata.party_b ?? '-'}
+                </Descriptions.Item>
+                <Descriptions.Item label="客户分类">
+                  {formatCustomerCategory(
+                    detailMetadata.customer_category_level1 ?? detailMetadata.contract_type,
+                    detailMetadata.customer_category_level2 ?? undefined
+                  )}
+                </Descriptions.Item>
+                <Descriptions.Item label="合同金额">{formatAmountDisplay(detailMetadata.contract_amount)}</Descriptions.Item>
+                <Descriptions.Item label="签订日期">{formatDateDisplay(detailMetadata.signing_date)}</Descriptions.Item>
+                <Descriptions.Item label="岗位信息" span={2}>{detailMetadata.positions ?? '-'}</Descriptions.Item>
+                <Descriptions.Item label="人员清单" span={2}>{detailMetadata.personnel_list ?? '-'}</Descriptions.Item>
+                <Descriptions.Item label="合同内容" span={2}>
+                  <Paragraph style={{ marginBottom: 0 }}>{detailMetadata.project_description ?? '-'}</Paragraph>
+                </Descriptions.Item>
+                <Descriptions.Item label="提取时间">{formatDateTimeDisplay(detailMetadata.extracted_at)}</Descriptions.Item>
               </Descriptions>
+            ) : (
+              <Text type="secondary">暂无已保存的元数据信息</Text>
+            )}
 
-              {/* 中部 3：OCR 文档块文本内容（按页）*/}
-              <Divider orientation="left">OCR 文本（按页）</Divider>
-              {Array.isArray(detailData.pages) && detailData.pages.length > 0 ? (
-                <Collapse accordion>
-                  {detailData.pages.map((p, idx) => (
-                    <Panel header={`第 ${p.pageId ?? idx + 1} 页`} key={String(p.pageId ?? idx)}>
-                      <Paragraph style={{ whiteSpace: 'pre-wrap', fontFamily: 'monospace', background: '#fafafa', padding: 12, borderRadius: 6, border: '1px solid #f0f0f0' }}>
-                        {p.text || '（无文本）'}
-                      </Paragraph>
-                    </Panel>
-                  ))}
-                </Collapse>
-              ) : (
-                <Text type="secondary">暂无OCR文本内容</Text>
-              )}
-            </div>
-          ) : null}
-        </Card>
-      )}
+            {/* 中部 2：合同总页数、上传时间 */}
+            <Divider orientation="left">文档信息</Divider>
+            <Descriptions size="small" column={3}>
+              <Descriptions.Item label="总页数">{detailData.totalPages ?? '-'}</Descriptions.Item>
+              <Descriptions.Item label="上传时间">{detailData.uploadTime ?? '-'}</Descriptions.Item>
+              <Descriptions.Item label="文件大小">{detailData.fileSize ?? '-'}</Descriptions.Item>
+            </Descriptions>
+
+            {/* 中部 3：OCR 文档块文本内容（按页）*/}
+            <Divider orientation="left">OCR 文本（按页）</Divider>
+            {Array.isArray(detailData.pages) && detailData.pages.length > 0 ? (
+              <Collapse accordion>
+                {detailData.pages.map((p, idx) => (
+                  <Panel header={`第 ${p.pageId ?? idx + 1} 页`} key={String(p.pageId ?? idx)}>
+                    <Paragraph style={{ whiteSpace: 'pre-wrap', fontFamily: 'monospace', background: '#fafafa', padding: 12, borderRadius: 6, border: '1px solid #f0f0f0' }}>
+                      {p.text || '（无文本）'}
+                    </Paragraph>
+                  </Panel>
+                ))}
+              </Collapse>
+            ) : (
+              <Text type="secondary">暂无OCR文本内容</Text>
+            )}
+          </div>
+        ) : (
+          <Text type="secondary">未选择合同</Text>
+        )}
+      </Modal>
 
       {/* 上传区域 */}
       <Card style={{ marginBottom: '24px' }}>

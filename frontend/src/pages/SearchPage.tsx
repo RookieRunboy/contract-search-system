@@ -836,31 +836,31 @@ const SearchPage: FC = () => {
                            gap: '8px',
                            fontSize: '13px'
                          }}>
-                           {(contract.metadata_info.customer_name || contract.metadata_info.party_a) && (
-                             <div>
-                               <Text type="secondary">客户名称：</Text>
-                               <Text>
-                                 {highlightMetadataText(
-                                   contract.metadata_info.customer_name ?? contract.metadata_info.party_a, 
-                                   Array.from(new Set([
-                                     ...getMetadataHighlights(contract, 'customer_name'),
-                                     ...getMetadataHighlights(contract, 'party_a'),
-                                   ]))
-                                 )}
+                          {(contract.metadata_info.customer_name || contract.metadata_info.party_a) && (
+                          <div>
+                            <Text type="secondary">客户名称：</Text>
+                            <Text>
+                              {highlightMetadataText(
+                                  contract.metadata_info.customer_name ?? contract.metadata_info.party_a ?? '', 
+                                  Array.from(new Set([
+                                    ...getMetadataHighlights(contract, 'customer_name'),
+                                    ...getMetadataHighlights(contract, 'party_a'),
+                                  ]))
+                                )}
                                </Text>
                              </div>
                            )}
-                           {(contract.metadata_info.our_entity || contract.metadata_info.party_b) && (
-                             <div>
-                               <Text type="secondary">我方实体：</Text>
-                               <Text>
-                                 {highlightMetadataText(
-                                   contract.metadata_info.our_entity ?? contract.metadata_info.party_b, 
-                                   Array.from(new Set([
-                                     ...getMetadataHighlights(contract, 'our_entity'),
-                                     ...getMetadataHighlights(contract, 'party_b'),
-                                   ]))
-                                 )}
+                          {(contract.metadata_info.our_entity || contract.metadata_info.party_b) && (
+                          <div>
+                            <Text type="secondary">我方实体：</Text>
+                            <Text>
+                              {highlightMetadataText(
+                                  contract.metadata_info.our_entity ?? contract.metadata_info.party_b ?? '', 
+                                  Array.from(new Set([
+                                    ...getMetadataHighlights(contract, 'our_entity'),
+                                    ...getMetadataHighlights(contract, 'party_b'),
+                                  ]))
+                                )}
                                </Text>
                              </div>
                            )}

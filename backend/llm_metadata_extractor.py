@@ -19,8 +19,8 @@ CHINASOFT_ENTITY_NAMES: List[str] = [
     "Chinasoft International Technology Service (Hong Kong) Limited",
 ]
 
-DEFAULT_CUSTOMER_CATEGORY_PATH = Path.home() / (
-    "Library/Containers/com.huawei.cloud.welink/Data/IM/0000439732@csi/ReceiveFiles/金融客户白名单.xlsx"
+DEFAULT_CUSTOMER_CATEGORY_PATH = (
+    Path(__file__).resolve().parents[1] / "金融客户白名单.xlsx"
 )
 
 from document_processor import DocumentProcessor

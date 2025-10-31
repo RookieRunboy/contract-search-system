@@ -102,10 +102,9 @@ class CustomerCategoryLookup:
         try:
             worksheet = workbook.active
             rows = worksheet.iter_rows(min_row=1, values_only=True)
-            try:
-                header = next(rows)
-            except StopIteration as exc:
-                raise RuntimeError("客户分类白名单为空") from exc
+            header = CustomerCategoryLookup._find_header_row(rows)
+            if header is None:
+                raise RuntimeError("客户分类白名单为空")
 
             column_index = self._resolve_column_indices(header)
             if column_index["customer_name"] is None:
@@ -146,8 +145,8 @@ class CustomerCategoryLookup:
         normalized_headers = [CustomerCategoryLookup._normalize_header(cell) for cell in header_row]
 
         name_candidates = {"客户名称", "客户名", "客户", "公司名称", "名称"}
-        level1_candidates = {"一级分类", "一级客户分类", "一级类", "一级"}
-        level2_candidates = {"二级分类", "二级客户分类", "二级类", "二级"}
+        level1_candidates = {"一级分类", "一级客户分类", "一级类", "一级", "客户属性", "一级属性"}
+        level2_candidates = {"二级分类", "二级客户分类", "二级类", "二级", "二级属性"}
 
         def find_index(candidates: set[str]) -> Optional[int]:
             for idx, header in enumerate(normalized_headers):
@@ -171,6 +170,13 @@ class CustomerCategoryLookup:
         text = text.replace("\u3000", " ")
         text = _WHITESPACE_PATTERN.sub("", text)
         return text
+
+    @staticmethod
+    def _find_header_row(rows: iter) -> Optional[Tuple[Optional[object], ...]]:
+        for row in rows:
+            if any(CustomerCategoryLookup._normalize_header(cell) for cell in row):
+                return row
+        return None
 
     @staticmethod
     def _get_cell_value(row: Tuple[Optional[object], ...], index: Optional[int]) -> Optional[str]:

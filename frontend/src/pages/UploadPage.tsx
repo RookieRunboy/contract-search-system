@@ -33,7 +33,7 @@ import {
   SyncOutlined,
   CloudUploadOutlined,
 } from '@ant-design/icons';
-import { API_BASE_URL, deleteDocument, getUploadedDocuments, getDocumentDetail } from '../services/api';
+import { API_BASE_URL, deleteDocument, getUploadedDocuments, getDocumentDetail, downloadDocument } from '../services/api';
 import MetadataEditModal from '../components/MetadataEditModal';
 import type { ContractMetadata } from '../types';
 import type { ColumnsType } from 'antd/es/table';
@@ -291,6 +291,7 @@ const UploadPage: FC = () => {
   const [detailModalVisible, setDetailModalVisible] = useState(false);
   const [deletePopoverKey, setDeletePopoverKey] = useState<string | null>(null);
   const [deleteLoadingKey, setDeleteLoadingKey] = useState<string | null>(null);
+  const [downloadingKey, setDownloadingKey] = useState<string | null>(null);
 
   // 获取文档列表
   const fetchDocuments = useCallback(async (silent = false) => {
@@ -461,6 +462,31 @@ const UploadPage: FC = () => {
     } catch (error) {
       console.error('获取元数据失败:', error);
       message.error('获取元数据失败');
+    }
+  };
+
+  const handleDownloadDocument = async (record: DocumentRecord) => {
+    const rawName = record.fileName ?? `${record.contractKey}.pdf`;
+    const fileName = rawName.toLowerCase().endsWith('.pdf') ? rawName : `${rawName}.pdf`;
+
+    setDownloadingKey(record.contractKey);
+    try {
+      const blob = await downloadDocument(fileName);
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      message.success('文件下载成功');
+    } catch (error) {
+      console.error('下载文档失败:', error);
+      message.error('文件下载失败，请稍后重试');
+    } finally {
+      setDownloadingKey((current) => (current === record.contractKey ? null : current));
     }
   };
 
@@ -641,7 +667,8 @@ const UploadPage: FC = () => {
             <Button 
               type="text" 
               icon={<DownloadOutlined />} 
-              onClick={() => message.info('下载功能开发中')}
+              loading={downloadingKey === record.contractKey}
+              onClick={() => handleDownloadDocument(record)}
             />
           </Tooltip>
           <Popconfirm

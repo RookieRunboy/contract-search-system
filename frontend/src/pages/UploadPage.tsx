@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FC, ReactNode } from 'react';
 import {
   Upload,
@@ -74,6 +74,11 @@ const STATUS_LABELS: Record<string, string> = {
   completed: '解析成功',
   failed: '解析失败',
 };
+
+interface UploadPageProps {
+  uploadPassword: string | null;
+  onPasswordInvalid?: () => void;
+}
 
 const asString = (value: unknown): string | undefined => {
   return typeof value === 'string' && value.trim() !== '' ? value : undefined;
@@ -276,12 +281,16 @@ interface DocumentDetail {
   }>;
 }
 
-const UploadPage: FC = () => {
+const UploadPage: FC<UploadPageProps> = ({ uploadPassword, onPasswordInvalid }) => {
   const [uploading, setUploading] = useState(false);
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [currentMetadata, setCurrentMetadata] = useState<ContractMetadata | null>(null);
   const [metadataModalVisible, setMetadataModalVisible] = useState(false);
+  const uploadPasswordRef = useRef<string | null>(uploadPassword);
+  useEffect(() => {
+    uploadPasswordRef.current = uploadPassword;
+  }, [uploadPassword]);
   
   // 详情视图相关状态
   const [selectedContractKey, setSelectedContractKey] = useState<string | null>(null);
@@ -292,6 +301,24 @@ const UploadPage: FC = () => {
   const [deletePopoverKey, setDeletePopoverKey] = useState<string | null>(null);
   const [deleteLoadingKey, setDeleteLoadingKey] = useState<string | null>(null);
   const [downloadingKey, setDownloadingKey] = useState<string | null>(null);
+
+  const resetUploadPassword = useCallback(() => {
+    uploadPasswordRef.current = null;
+    if (onPasswordInvalid) {
+      onPasswordInvalid();
+    }
+  }, [onPasswordInvalid]);
+
+  const ensureUploadPassword = useCallback(async (): Promise<boolean> => {
+    if (uploadPasswordRef.current) {
+      return true;
+    }
+    message.error('缺少上传密码，请重新验证');
+    if (onPasswordInvalid) {
+      onPasswordInvalid();
+    }
+    return false;
+  }, [onPasswordInvalid]);
 
   // 获取文档列表
   const fetchDocuments = useCallback(async (silent = false) => {
@@ -503,16 +530,28 @@ const UploadPage: FC = () => {
     accept: '.pdf',
     multiple: true,
     showUploadList: false,
-    beforeUpload: (file: File) => {
+    data: () => ({
+      upload_password: uploadPasswordRef.current ?? '',
+    }),
+    beforeUpload: async (file: File) => {
       const isPDF = file.type === 'application/pdf';
       if (!isPDF) {
         message.error('只能上传PDF文件!');
-        return false;
+        return Upload.LIST_IGNORE;
       }
       const isLt50M = file.size / 1024 / 1024 < 50;
       if (!isLt50M) {
         message.error('文件大小不能超过50MB!');
-        return false;
+        return Upload.LIST_IGNORE;
+      }
+      const allowed = await ensureUploadPassword();
+      if (!allowed) {
+        message.info('已取消上传');
+        return Upload.LIST_IGNORE;
+      }
+      if (!uploadPasswordRef.current) {
+        message.error('缺少上传密码');
+        return Upload.LIST_IGNORE;
       }
       return true;
     },
@@ -537,7 +576,14 @@ const UploadPage: FC = () => {
 
       if (status === 'error') {
         const hasUploading = info.fileList.some((item) => item.status === 'uploading');
-        message.error(`${info.file.name} 上传失败`);
+        const responseDetail = (info.file.response as { detail?: string; message?: string } | undefined)?.detail
+          || (info.file.response as { message?: string } | undefined)?.message;
+        const errorMessage = responseDetail || `${info.file.name} 上传失败`;
+        message.error(errorMessage);
+        const httpStatus = (info.file.error as { status?: number } | undefined)?.status;
+        if (httpStatus === 403 || (typeof responseDetail === 'string' && responseDetail.includes('密码'))) {
+          resetUploadPassword();
+        }
         setUploading(hasUploading);
       }
     },

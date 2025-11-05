@@ -1,10 +1,12 @@
 import asyncio
 from datetime import datetime, timezone
+import logging
 import os
+import secrets
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Union
 
-from fastapi import FastAPI, File, UploadFile, HTTPException, Query
+from fastapi import FastAPI, File, UploadFile, HTTPException, Query, Form
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -23,6 +25,8 @@ from upload_status_manager import UploadStatusManager
 
 # FastAPI应用
 app = FastAPI(title="contractsSearchAPI")
+
+logger = logging.getLogger(__name__)
 
 BACKEND_DIR = Path(__file__).resolve().parent
 load_dotenv(BACKEND_DIR / ".env")
@@ -55,7 +59,58 @@ doc_getter = get_document_by_filename()
 metadata_extractor = MetadataExtractor()
 status_manager = UploadStatusManager()
 
+DEFAULT_UPLOAD_PASSWORD = "20251103"
+UPLOAD_PASSWORD = os.getenv("UPLOAD_PASSWORD", DEFAULT_UPLOAD_PASSWORD)
+
+if UPLOAD_PASSWORD == DEFAULT_UPLOAD_PASSWORD:
+    logger.warning("UPLOAD_PASSWORD not set, falling back to default placeholder password.")
+
+
+def _verify_upload_password(candidate: str) -> bool:
+    if not candidate:
+        return False
+    try:
+        return secrets.compare_digest(candidate, UPLOAD_PASSWORD)
+    except Exception:  # noqa: BLE001
+        return False
+
 ACTIVE_UPLOAD_TASKS: Set[asyncio.Task[Any]] = set()
+
+
+def _resolve_upload_dir() -> Path:
+    env_dir = os.getenv("CONTRACT_UPLOAD_DIR") or os.getenv("UPLOAD_DIR")
+
+    candidate_paths: List[Path] = []
+    if env_dir:
+        candidate_paths.append(Path(env_dir).expanduser())
+
+    repo_root = BACKEND_DIR.parent
+    candidate_paths.extend([
+        repo_root / "uploaded_contracts",
+        BACKEND_DIR / "uploaded_contracts",
+        Path.cwd() / "uploaded_contracts",
+        Path.cwd() / "backend" / "uploaded_contracts",
+    ])
+
+    seen: Set[Path] = set()
+    unique_candidates: List[Path] = []
+    for candidate in candidate_paths:
+        resolved = candidate.resolve()
+        if resolved not in seen:
+            unique_candidates.append(candidate)
+            seen.add(resolved)
+
+    for candidate in unique_candidates:
+        if candidate.exists() and candidate.is_dir():
+            resolved_candidate = candidate.resolve()
+            logger.info("Using upload directory: %s", resolved_candidate)
+            return resolved_candidate
+
+    default_dir = unique_candidates[0] if unique_candidates else (repo_root / "uploaded_contracts")
+    default_dir.mkdir(parents=True, exist_ok=True)
+    resolved_default = default_dir.resolve()
+    logger.info("Created upload directory: %s", resolved_default)
+    return resolved_default
 
 
 def _register_background_task(task: asyncio.Task[Any]) -> None:
@@ -355,7 +410,7 @@ async def get_document_list():
         "data": documents,
     }
 
-UPLOAD_DIR = Path(__file__).resolve().parent.parent / "uploaded_contracts"
+UPLOAD_DIR = _resolve_upload_dir()
 
 
 def _format_file_size(size_in_bytes: int) -> str:
@@ -400,9 +455,13 @@ async def root():
 
 @app.post("/document/add")
 async def upload_document(
+    upload_password: str = Form(..., alias="upload_password", description="上传文档时的访问密码"),
     files: List[UploadFile] = File(..., description="上传的PDF合同文件，支持一次选择多个")
 ):
     """上传PDF文档并异步执行解析流程。"""
+
+    if not _verify_upload_password(upload_password):
+        raise HTTPException(status_code=403, detail="上传密码错误")
 
     if not files:
         raise HTTPException(status_code=400, detail="请至少上传一个文件")
@@ -412,7 +471,7 @@ async def upload_document(
 
     allowed_types = {'application/pdf'}
     max_file_size = 100 * 1024 * 1024  # 100MB
-    UPLOAD_DIR.mkdir(exist_ok=True)
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
     for upload in files:
         filename = upload.filename or "unknown.pdf"
@@ -505,9 +564,10 @@ async def upload_document(
 # 兼容别名：POST /upload -> /document/add
 @app.post("/upload")
 async def upload_alias(
+    upload_password: str = Form(..., alias="upload_password", description="上传文档时的访问密码"),
     files: List[UploadFile] = File(..., description="上传的PDF合同文件，支持一次选择多个")
 ):
-    return await upload_document(files)
+    return await upload_document(upload_password=upload_password, files=files)
 
 
 @app.delete("/document/delete")

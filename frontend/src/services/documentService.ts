@@ -1,4 +1,4 @@
-import api, { normalizeSearchList } from './api';
+import api, { normalizeSearchList, type UploadDocumentOptions } from './api';
 import type { ContractSearchResult } from '../types';
 
 export interface SearchResult {
@@ -22,13 +22,19 @@ export interface SystemStatus {
 }
 
 // 文档上传
-export const uploadDocument = async (files: File | File[]): Promise<any> => {
+export const uploadDocument = async (files: File | File[], options?: Pick<UploadDocumentOptions, 'password'>): Promise<any> => {
   const formData = new FormData();
   const fileList = Array.isArray(files) ? files : [files];
 
   fileList.forEach((file) => {
     formData.append('files', file);
   });
+
+  const password = options?.password;
+  if (!password) {
+    throw new Error('缺少上传密码');
+  }
+  formData.append('upload_password', password);
   
   return api.post('/document/add', formData, {
     headers: {

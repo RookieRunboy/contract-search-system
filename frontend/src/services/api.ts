@@ -256,8 +256,16 @@ export const searchDocuments = async (
   return normalizeSearchList(list);
 };
 
+export interface UploadDocumentOptions {
+  password: string;
+  onProgress?: (progress: number) => void;
+}
+
 // 文档上传接口
-export const uploadDocument = async (files: File | File[], onProgress?: (progress: number) => void): Promise<any> => {
+export const uploadDocument = async (
+  files: File | File[],
+  options?: UploadDocumentOptions
+): Promise<any> => {
   const formData = new FormData();
   const fileList = Array.isArray(files) ? files : [files];
 
@@ -265,15 +273,21 @@ export const uploadDocument = async (files: File | File[], onProgress?: (progres
     formData.append('files', file);
   });
 
+  const password = options?.password;
+  if (!password) {
+    throw new Error('缺少上传密码');
+  }
+  formData.append('upload_password', password);
+
   try {
     const result = await api.post('/upload', formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
       onUploadProgress: (progressEvent) => {
-        if (progressEvent.total && onProgress) {
+        if (progressEvent.total && options?.onProgress) {
           const progress = progressEvent.loaded / progressEvent.total;
-          onProgress(progress);
+          options.onProgress(progress);
         }
       },
     });

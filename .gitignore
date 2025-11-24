@@ -46,6 +46,7 @@ uploaded_contracts/
 *.pdf
 *.docx
 *.doc
+backend/data/*.json
 
 # 部署配置（敏感信息）
 服务器部署.md

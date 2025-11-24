@@ -22,7 +22,7 @@ export interface SystemStatus {
 }
 
 // 文档上传
-export const uploadDocument = async (files: File | File[], options?: Pick<UploadDocumentOptions, 'password'>): Promise<any> => {
+export const uploadDocument = async (files: File | File[], _options?: UploadDocumentOptions): Promise<any> => {
   const formData = new FormData();
   const fileList = Array.isArray(files) ? files : [files];
 
@@ -30,12 +30,6 @@ export const uploadDocument = async (files: File | File[], options?: Pick<Upload
     formData.append('files', file);
   });
 
-  const password = options?.password;
-  if (!password) {
-    throw new Error('缺少上传密码');
-  }
-  formData.append('upload_password', password);
-  
   return api.post('/document/add', formData, {
     headers: {
       'Content-Type': 'multipart/form-data',

@@ -2,6 +2,8 @@ import axios from 'axios';
 import type { ContractSearchResult, DocumentChunk, MetadataExtractionResponse, ContractMetadata } from '../types/index';
 
 export const API_BASE_URL = import.meta.env.DEV ? '/api' : '';
+export const AUTH_TOKEN_STORAGE_KEY = 'contract_search_access_token';
+export const AUTH_USER_STORAGE_KEY = 'contract_search_current_user';
 
 // 创建 axios 实例
 const api = axios.create({
@@ -12,6 +14,11 @@ const api = axios.create({
 // 请求拦截器
 api.interceptors.request.use(
   (config) => {
+    const token = localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
+    if (token) {
+      config.headers = config.headers ?? {};
+      config.headers.Authorization = `Bearer ${token}`;
+    }
     return config;
   },
   (error) => {
@@ -257,7 +264,6 @@ export const searchDocuments = async (
 };
 
 export interface UploadDocumentOptions {
-  password: string;
   onProgress?: (progress: number) => void;
 }
 
@@ -272,12 +278,6 @@ export const uploadDocument = async (
   fileList.forEach((file) => {
     formData.append('files', file);
   });
-
-  const password = options?.password;
-  if (!password) {
-    throw new Error('缺少上传密码');
-  }
-  formData.append('upload_password', password);
 
   try {
     const result = await api.post('/upload', formData, {
@@ -351,9 +351,15 @@ export const clearAllDocuments = async (): Promise<any> => {
 export const downloadDocument = async (documentName: string): Promise<Blob> => {
   try {
     // 直接使用axios而不是api实例，避免响应拦截器破坏Blob对象
+    const token = localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
+    const headers: Record<string, string> = {};
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+    }
     const response = await axios.get(`${API_BASE_URL}/document/download/${encodeURIComponent(documentName)}`, {
       responseType: 'blob',
-      timeout: 60000
+      timeout: 60000,
+      headers,
     });
     return response.data;
   } catch (error: any) {
@@ -364,9 +370,15 @@ export const downloadDocument = async (documentName: string): Promise<Blob> => {
 // 提取文档元数据
 export const extractMetadata = async (filename: string): Promise<MetadataExtractionResponse> => {
   try {
+    const token = localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
+    const headers: Record<string, string> = {};
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+    }
     const response = await axios.post(`${API_BASE_URL}/document/extract-metadata`, null, {
       params: { filename },
-      timeout: 120000 // 2分钟超时，因为LLM调用可能较慢
+      timeout: 120000, // 2分钟超时，因为LLM调用可能较慢
+      headers,
     });
     return response.data;
   } catch (error: any) {
@@ -377,10 +389,15 @@ export const extractMetadata = async (filename: string): Promise<MetadataExtract
 
 // 保存文档元数据
 export const saveMetadata = async (filename: string, metadata: ContractMetadata) => {
+  const token = localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
   const response = await axios.post(`${API_BASE_URL}/document/save-metadata`, {
     filename,
     metadata
-  });
+  }, { headers });
   return response.data;
 };
 

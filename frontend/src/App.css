@@ -74,6 +74,38 @@ th,
   min-height: 100vh;
 }
 
+.app-header {
+  background: rgba(255, 255, 255, 0.98) !important;
+  padding: 12px 24px !important;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+}
+
+.app-user-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.app-user-name {
+  color: #1f2937 !important;
+}
+
+.app-user-role {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: #6b7280 !important;
+}
+
 /* Ant Design 布局样式 */
 .ant-layout {
   min-height: 100vh;

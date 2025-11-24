@@ -1,17 +1,19 @@
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import logging
 import os
-import secrets
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Union
 
-from fastapi import FastAPI, File, UploadFile, HTTPException, Query, Form
+from fastapi import Body, Depends, FastAPI, File, UploadFile, HTTPException, Query
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from jose import JWTError, jwt
+from pydantic import BaseModel, Field
 
 from dotenv import load_dotenv
 
@@ -22,6 +24,7 @@ from elasticSearchOutput import get_document_by_filename
 from llm_metadata_extractor import MetadataExtractor
 from elasticsearch import exceptions as es_exceptions, helpers
 from upload_status_manager import UploadStatusManager
+from auth_manager import AuthManager
 
 # FastAPI应用
 app = FastAPI(title="contractsSearchAPI")
@@ -58,23 +61,70 @@ es_searcher = ElasticsearchVectorSearch()
 doc_getter = get_document_by_filename()
 metadata_extractor = MetadataExtractor()
 status_manager = UploadStatusManager()
+auth_manager = AuthManager()
 
-DEFAULT_UPLOAD_PASSWORD = "20251103"
-UPLOAD_PASSWORD = os.getenv("UPLOAD_PASSWORD", DEFAULT_UPLOAD_PASSWORD)
+try:
+    ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("AUTH_TOKEN_EXPIRE_MINUTES", "30"))
+except ValueError:
+    ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
-if UPLOAD_PASSWORD == DEFAULT_UPLOAD_PASSWORD:
-    logger.warning("UPLOAD_PASSWORD not set, falling back to default placeholder password.")
+AUTH_SECRET_KEY = os.getenv("AUTH_SECRET_KEY")
+if not AUTH_SECRET_KEY:
+    AUTH_SECRET_KEY = "change-me-in-production"
+    logger.warning("AUTH_SECRET_KEY 未设置，当前使用临时密钥，请尽快在环境变量中配置 AUTH_SECRET_KEY")
 
-
-def _verify_upload_password(candidate: str) -> bool:
-    if not candidate:
-        return False
-    try:
-        return secrets.compare_digest(candidate, UPLOAD_PASSWORD)
-    except Exception:  # noqa: BLE001
-        return False
+AUTH_ALGORITHM = "HS256"
+auth_scheme = HTTPBearer(auto_error=False)
 
 ACTIVE_UPLOAD_TASKS: Set[asyncio.Task[Any]] = set()
+
+
+class LoginRequest(BaseModel):
+    user_id: str = Field(..., min_length=3, max_length=50, pattern=r"^[A-Za-z0-9_.-]+$")
+    password: str = Field(..., min_length=6, max_length=128)
+
+
+class RegisterRequest(BaseModel):
+    user_id: str = Field(..., min_length=3, max_length=50, pattern=r"^[A-Za-z0-9_.-]+$")
+    password: str = Field(..., min_length=8, max_length=128)
+    confirm_password: str = Field(..., min_length=8, max_length=128)
+
+
+class RegistrationDecision(BaseModel):
+    reason: Optional[str] = Field(default=None, max_length=200)
+
+
+def _create_access_token(user_id: str, role: str, expires_minutes: Optional[int] = None) -> str:
+    lifetime = expires_minutes or ACCESS_TOKEN_EXPIRE_MINUTES
+    expire = datetime.utcnow() + timedelta(minutes=lifetime)
+    to_encode = {"sub": user_id, "role": role, "exp": expire}
+    return jwt.encode(to_encode, AUTH_SECRET_KEY, algorithm=AUTH_ALGORITHM)
+
+
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(auth_scheme)) -> Dict[str, Any]:
+    if credentials is None:
+        raise HTTPException(status_code=401, detail="未提供认证信息")
+    token = credentials.credentials
+    try:
+        payload = jwt.decode(token, AUTH_SECRET_KEY, algorithms=[AUTH_ALGORITHM])
+    except JWTError:
+        raise HTTPException(status_code=401, detail="凭证无效")
+
+    user_id = payload.get("sub")
+    role = payload.get("role")
+    if not user_id or not role:
+        raise HTTPException(status_code=401, detail="凭证无效")
+
+    user = auth_manager.get_user(user_id)
+    if not user:
+        raise HTTPException(status_code=401, detail="用户不存在或已禁用")
+    return user
+
+
+def require_admin(current_user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+    return current_user
 
 
 def _resolve_upload_dir() -> Path:
@@ -349,7 +399,7 @@ async def _process_uploaded_file(upload_id: str, file_path: Path) -> None:
 
 
 @app.get("/document/list")
-async def get_document_list():
+async def get_document_list(current_user: Dict[str, Any] = Depends(require_admin)):
     """获取已上传的文档列表，包含实时解析状态。"""
 
     status_docs: List[Dict[str, Any]] = []
@@ -427,6 +477,78 @@ def _format_file_size(size_in_bytes: int) -> str:
     return f"{size_in_gb:.2f} GB"
 
 
+@app.post("/auth/login")
+async def login(payload: LoginRequest):
+    normalized_id = payload.user_id.strip()
+    user = auth_manager.authenticate(normalized_id, payload.password)
+    if not user:
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+
+    token = _create_access_token(user["user_id"], user.get("role", "normal"))
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        "user": user,
+    }
+
+
+@app.post("/auth/register")
+async def register(payload: RegisterRequest):
+    if payload.password != payload.confirm_password:
+        raise HTTPException(status_code=400, detail="两次输入的密码不一致")
+    normalized_id = payload.user_id.strip()
+    try:
+        record = auth_manager.submit_registration(normalized_id, payload.password)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {
+        "code": 200,
+        "message": "注册申请提交成功，请等待管理员审批",
+        "data": record,
+    }
+
+
+@app.get("/admin/registrations")
+async def list_registrations(current_user: Dict[str, Any] = Depends(require_admin)):
+    pending = auth_manager.list_pending_registrations()
+    return {
+        "code": 200,
+        "message": "获取成功",
+        "data": pending,
+    }
+
+
+@app.post("/admin/registrations/{request_id}/approve")
+async def approve_registration(request_id: str, current_user: Dict[str, Any] = Depends(require_admin)):
+    try:
+        user = auth_manager.approve_registration(request_id, current_user["user_id"])
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {
+        "code": 200,
+        "message": "已通过注册申请",
+        "data": user,
+    }
+
+
+@app.post("/admin/registrations/{request_id}/reject")
+async def reject_registration(
+    request_id: str,
+    payload: RegistrationDecision = Body(default_factory=RegistrationDecision),
+    current_user: Dict[str, Any] = Depends(require_admin),
+):
+    try:
+        result = auth_manager.reject_registration(request_id, current_user["user_id"], payload.reason)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {
+        "code": 200,
+        "message": "已拒绝注册申请",
+        "data": result,
+    }
+
+
 @app.get("/")
 async def root():
     if FRONTEND_INDEX_FILE.exists():
@@ -455,13 +577,10 @@ async def root():
 
 @app.post("/document/add")
 async def upload_document(
-    upload_password: str = Form(..., alias="upload_password", description="上传文档时的访问密码"),
-    files: List[UploadFile] = File(..., description="上传的PDF合同文件，支持一次选择多个")
+    files: List[UploadFile] = File(..., description="上传的PDF合同文件，支持一次选择多个"),
+    current_user: Dict[str, Any] = Depends(require_admin),
 ):
     """上传PDF文档并异步执行解析流程。"""
-
-    if not _verify_upload_password(upload_password):
-        raise HTTPException(status_code=403, detail="上传密码错误")
 
     if not files:
         raise HTTPException(status_code=400, detail="请至少上传一个文件")
@@ -564,14 +683,17 @@ async def upload_document(
 # 兼容别名：POST /upload -> /document/add
 @app.post("/upload")
 async def upload_alias(
-    upload_password: str = Form(..., alias="upload_password", description="上传文档时的访问密码"),
-    files: List[UploadFile] = File(..., description="上传的PDF合同文件，支持一次选择多个")
+    files: List[UploadFile] = File(..., description="上传的PDF合同文件，支持一次选择多个"),
+    current_user: Dict[str, Any] = Depends(require_admin),
 ):
-    return await upload_document(upload_password=upload_password, files=files)
+    return await upload_document(files=files, current_user=current_user)
 
 
 @app.delete("/document/delete")
-async def delete_by_filename(filename: str = Query(..., description="要删除的文件名")):
+async def delete_by_filename(
+    filename: str = Query(..., description="要删除的文件名"),
+    current_user: Dict[str, Any] = Depends(require_admin),
+):
     """
     根据文件名删除文档
     """
@@ -609,6 +731,7 @@ async def delete_by_filename(filename: str = Query(..., description="要删除�
 
 @app.get("/document/search")
 async def search_documents(
+        current_user: Dict[str, Any] = Depends(get_current_user),
         # 兼容旧版本的query参数
         query: Optional[str] = Query(default=None, description="搜索关键词（兼容参数）"),
         # 新版本的分离参数
@@ -749,6 +872,7 @@ async def search_documents(
 # 兼容别名：GET /search -> /document/search
 @app.get("/search")
 async def search_alias(
+        current_user: Dict[str, Any] = Depends(get_current_user),
         # 兼容旧版本的query参数
         query: Optional[str] = Query(default=None, description="搜索关键词（兼容参数）"),
         # 新版本的分离参数
@@ -772,6 +896,7 @@ async def search_alias(
         fuzziness: Optional[str] = Query(default="AUTO", description="模糊匹配级别")
 ):
     return await search_documents(
+        current_user=current_user,
         query=query,
         query_content=query_content,
         query_metadata=query_metadata,
@@ -794,7 +919,7 @@ async def search_alias(
 
 # 系统信息接口
 @app.get("/system/elasticsearch")
-async def get_elasticsearch_info():
+async def get_elasticsearch_info(current_user: Dict[str, Any] = Depends(require_admin)):
     """
     获取Elasticsearch系统信息
     """
@@ -823,15 +948,18 @@ async def get_elasticsearch_info():
 
 # 兼容别名：GET /documents -> /document/list
 @app.get("/documents")
-async def get_uploaded_documents():
+async def get_uploaded_documents(current_user: Dict[str, Any] = Depends(require_admin)):
     """
     获取已上传的文档列表（兼容接口）
     """
-    return await get_document_list()
+    return await get_document_list(current_user=current_user)
 
 
 @app.get("/documents/{document_name}/detail")
-async def get_document_detail(document_name: str):
+async def get_document_detail(
+    document_name: str,
+    current_user: Dict[str, Any] = Depends(require_admin),
+):
     """
     获取指定文档的详细信息
     """
@@ -966,7 +1094,10 @@ async def get_document_detail(document_name: str):
 
 # 删除指定文档接口
 @app.delete("/documents/{document_name}")
-async def delete_document(document_name: str):
+async def delete_document(
+    document_name: str,
+    current_user: Dict[str, Any] = Depends(require_admin),
+):
     """
     删除指定文档的所有索引
     """
@@ -1006,7 +1137,7 @@ async def delete_document(document_name: str):
 
 # 清空索引接口
 @app.delete("/clear-index")
-async def clear_index():
+async def clear_index(current_user: Dict[str, Any] = Depends(require_admin)):
     """
     清空所有文档索引
     """
@@ -1058,7 +1189,7 @@ async def health_check():
 
 
 @app.get("/debug/documents")
-async def debug_documents():
+async def debug_documents(current_user: Dict[str, Any] = Depends(require_admin)):
     """
     调试用：获取所有文档的详细信息，包括text和text_vector字段
     """
@@ -1127,7 +1258,10 @@ async def debug_documents():
 
 
 @app.post("/document/extract-metadata")
-async def extract_metadata(filename: str = Query(..., description="要提取元数据的文件名")):
+async def extract_metadata(
+    filename: str = Query(..., description="要提取元数据的文件名"),
+    current_user: Dict[str, Any] = Depends(require_admin),
+):
     """
     从文档中提取元数据
     """
@@ -1181,7 +1315,10 @@ async def extract_metadata(filename: str = Query(..., description="要提取元�
 
 
 @app.post("/document/save-metadata")
-async def save_metadata(request: dict):
+async def save_metadata(
+    request: dict,
+    current_user: Dict[str, Any] = Depends(require_admin),
+):
     """
     保存文档元数据到统一索引的document_metadata字段
     """
@@ -1280,7 +1417,10 @@ async def save_metadata(request: dict):
 
 
 @app.get("/document/download/{document_name}")
-async def download_document(document_name: str):
+async def download_document(
+    document_name: str,
+    current_user: Dict[str, Any] = Depends(require_admin),
+):
     """
     下载原始PDF文档
     """

@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { FC, ReactNode } from 'react';
 import {
   Upload,
+  Input,
   Button,
   Card,
   Table,
@@ -34,11 +35,13 @@ import {
   CloudUploadOutlined,
 } from '@ant-design/icons';
 import { API_BASE_URL, deleteDocument, getUploadedDocuments, getDocumentDetail, downloadDocument } from '../services/api';
+import { fetchPendingRegistrations, approveRegistration as approveRegistrationRequest, rejectRegistration as rejectRegistrationRequest } from '../services/auth';
 import MetadataEditModal from '../components/MetadataEditModal';
-import type { ContractMetadata } from '../types';
+import type { ContractMetadata, RegistrationRequestSummary } from '../types';
 import type { ColumnsType } from 'antd/es/table';
 import type { UploadChangeParam } from 'antd/es/upload';
 import type { UploadFile } from 'antd/es/upload/interface';
+import { useAuth } from '../contexts/AuthContext';
 
 const { Title, Text, Paragraph } = Typography;
 const { Dragger } = Upload;
@@ -74,11 +77,6 @@ const STATUS_LABELS: Record<string, string> = {
   completed: '解析成功',
   failed: '解析失败',
 };
-
-interface UploadPageProps {
-  uploadPassword: string | null;
-  onPasswordInvalid?: () => void;
-}
 
 const asString = (value: unknown): string | undefined => {
   return typeof value === 'string' && value.trim() !== '' ? value : undefined;
@@ -281,17 +279,24 @@ interface DocumentDetail {
   }>;
 }
 
-const UploadPage: FC<UploadPageProps> = ({ uploadPassword, onPasswordInvalid }) => {
+const UploadPage: FC = () => {
+  const { token, user, logout } = useAuth();
+  const isAdmin = user?.role === 'admin';
   const [uploading, setUploading] = useState(false);
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [currentMetadata, setCurrentMetadata] = useState<ContractMetadata | null>(null);
   const [metadataModalVisible, setMetadataModalVisible] = useState(false);
-  const uploadPasswordRef = useRef<string | null>(uploadPassword);
-  useEffect(() => {
-    uploadPasswordRef.current = uploadPassword;
-  }, [uploadPassword]);
-  
+  const [registrationRequests, setRegistrationRequests] = useState<RegistrationRequestSummary[]>([]);
+  const [registrationLoading, setRegistrationLoading] = useState(false);
+  const [processingRequestId, setProcessingRequestId] = useState<string | null>(null);
+  const [rejectSubmitting, setRejectSubmitting] = useState(false);
+  const [rejectModal, setRejectModal] = useState<{ open: boolean; requestId: string | null; reason: string }>({
+    open: false,
+    requestId: null,
+    reason: '',
+  });
+ 
   // 详情视图相关状态
   const [selectedContractKey, setSelectedContractKey] = useState<string | null>(null);
   const [detailLoading, setDetailLoading] = useState<boolean>(false);
@@ -302,23 +307,99 @@ const UploadPage: FC<UploadPageProps> = ({ uploadPassword, onPasswordInvalid }) 
   const [deleteLoadingKey, setDeleteLoadingKey] = useState<string | null>(null);
   const [downloadingKey, setDownloadingKey] = useState<string | null>(null);
 
-  const resetUploadPassword = useCallback(() => {
-    uploadPasswordRef.current = null;
-    if (onPasswordInvalid) {
-      onPasswordInvalid();
+  const resolveApiError = useCallback((error: unknown, fallback: string): string => {
+    if (error && typeof error === 'object' && 'response' in error) {
+      const response = (error as { response?: { data?: { detail?: string; message?: string } } }).response;
+      const detailMessage = response?.data?.detail ?? response?.data?.message;
+      if (typeof detailMessage === 'string' && detailMessage.trim()) {
+        return detailMessage;
+      }
     }
-  }, [onPasswordInvalid]);
+    if (error instanceof Error && error.message) {
+      return error.message;
+    }
+    return fallback;
+  }, []);
 
-  const ensureUploadPassword = useCallback(async (): Promise<boolean> => {
-    if (uploadPasswordRef.current) {
-      return true;
+  const normalizeRegistrationRecord = (record: Record<string, any>): RegistrationRequestSummary => ({
+    requestId: String(record.request_id ?? record.requestId ?? ''),
+    userId: String(record.user_id ?? record.userId ?? ''),
+    status: (record.status ?? 'pending') as RegistrationRequestSummary['status'],
+    submittedAt: record.submitted_at ?? record.submittedAt ?? null,
+    reviewer: record.reviewer ?? null,
+    reviewedAt: record.reviewed_at ?? record.reviewedAt ?? null,
+    decisionReason: record.decision_reason ?? record.decisionReason ?? null,
+  });
+
+  const fetchRegistrationApplications = useCallback(async () => {
+    if (!isAdmin) {
+      setRegistrationRequests([]);
+      return;
     }
-    message.error('缺少上传密码，请重新验证');
-    if (onPasswordInvalid) {
-      onPasswordInvalid();
+    setRegistrationLoading(true);
+    try {
+      const response = await fetchPendingRegistrations();
+      const rawList: unknown[] = Array.isArray((response as any)?.data)
+        ? (response as any).data
+        : Array.isArray(response)
+          ? response
+          : [];
+      const normalized = rawList
+        .filter((item): item is Record<string, any> => Boolean(item) && typeof item === 'object')
+        .map((item) => normalizeRegistrationRecord(item));
+      setRegistrationRequests(normalized);
+    } catch (error) {
+      message.error(resolveApiError(error, '获取注册申请列表失败'));
+    } finally {
+      setRegistrationLoading(false);
     }
-    return false;
-  }, [onPasswordInvalid]);
+  }, [isAdmin, resolveApiError]);
+
+  const handleApproveRegistration = async (request: RegistrationRequestSummary) => {
+    setProcessingRequestId(request.requestId);
+    try {
+      await approveRegistrationRequest(request.requestId);
+      message.success(`已通过 ${request.userId} 的注册申请`);
+      await fetchRegistrationApplications();
+    } catch (error) {
+      message.error(resolveApiError(error, '审批失败，请稍后重试'));
+    } finally {
+      setProcessingRequestId(null);
+    }
+  };
+
+  const openRejectModal = (request: RegistrationRequestSummary) => {
+    setRejectModal({
+      open: true,
+      requestId: request.requestId,
+      reason: '',
+    });
+  };
+
+  const closeRejectModal = () => {
+    setRejectModal({
+      open: false,
+      requestId: null,
+      reason: '',
+    });
+  };
+
+  const handleRejectSubmit = async () => {
+    if (!rejectModal.requestId) {
+      return;
+    }
+    setRejectSubmitting(true);
+    try {
+      await rejectRegistrationRequest(rejectModal.requestId, rejectModal.reason?.trim() || undefined);
+      message.success('已拒绝注册申请');
+      closeRejectModal();
+      await fetchRegistrationApplications();
+    } catch (error) {
+      message.error(resolveApiError(error, '操作失败，请稍后重试'));
+    } finally {
+      setRejectSubmitting(false);
+    }
+  };
 
   // 获取文档列表
   const fetchDocuments = useCallback(async (silent = false) => {
@@ -530,10 +611,8 @@ const UploadPage: FC<UploadPageProps> = ({ uploadPassword, onPasswordInvalid }) 
     accept: '.pdf',
     multiple: true,
     showUploadList: false,
-    data: () => ({
-      upload_password: uploadPasswordRef.current ?? '',
-    }),
-    beforeUpload: async (file: File) => {
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    beforeUpload: (file: File) => {
       const isPDF = file.type === 'application/pdf';
       if (!isPDF) {
         message.error('只能上传PDF文件!');
@@ -544,13 +623,9 @@ const UploadPage: FC<UploadPageProps> = ({ uploadPassword, onPasswordInvalid }) 
         message.error('文件大小不能超过50MB!');
         return Upload.LIST_IGNORE;
       }
-      const allowed = await ensureUploadPassword();
-      if (!allowed) {
-        message.info('已取消上传');
-        return Upload.LIST_IGNORE;
-      }
-      if (!uploadPasswordRef.current) {
-        message.error('缺少上传密码');
+      if (!token) {
+        message.error('登录状态已失效，请重新登录');
+        logout();
         return Upload.LIST_IGNORE;
       }
       return true;
@@ -581,8 +656,8 @@ const UploadPage: FC<UploadPageProps> = ({ uploadPassword, onPasswordInvalid }) 
         const errorMessage = responseDetail || `${info.file.name} 上传失败`;
         message.error(errorMessage);
         const httpStatus = (info.file.error as { status?: number } | undefined)?.status;
-        if (httpStatus === 403 || (typeof responseDetail === 'string' && responseDetail.includes('密码'))) {
-          resetUploadPassword();
+        if (httpStatus === 401 || httpStatus === 403) {
+          logout();
         }
         setUploading(hasUploading);
       }
@@ -741,9 +816,52 @@ const UploadPage: FC<UploadPageProps> = ({ uploadPassword, onPasswordInvalid }) 
     },
   ];
 
+  const registrationColumns: ColumnsType<RegistrationRequestSummary> = [
+    {
+      title: '申请账号',
+      dataIndex: 'userId',
+      key: 'userId',
+      render: (text: string) => <Text strong>{text}</Text>,
+    },
+    {
+      title: '提交时间',
+      dataIndex: 'submittedAt',
+      key: 'submittedAt',
+      render: (value?: string | null) => <Text type="secondary">{formatDateTimeDisplay(value)}</Text>,
+    },
+    {
+      title: '操作',
+      key: 'actions',
+      render: (_: unknown, record) => (
+        <Space>
+          <Button
+            type="primary"
+            size="small"
+            onClick={() => handleApproveRegistration(record)}
+            loading={processingRequestId === record.requestId}
+          >
+            同意
+          </Button>
+          <Button
+            danger
+            size="small"
+            onClick={() => openRejectModal(record)}
+            disabled={processingRequestId === record.requestId}
+          >
+            拒绝
+          </Button>
+        </Space>
+      ),
+    },
+  ];
+
   useEffect(() => {
     fetchDocuments();
   }, [fetchDocuments]);
+
+  useEffect(() => {
+    fetchRegistrationApplications();
+  }, [fetchRegistrationApplications]);
 
   useEffect(() => {
     if (!documents.length) {
@@ -886,6 +1004,34 @@ const UploadPage: FC<UploadPageProps> = ({ uploadPassword, onPasswordInvalid }) 
         {uploading && <Progress percent={50} status="active" />}
       </Card>
 
+      {isAdmin && (
+        <Card style={{ marginBottom: '24px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+            <div>
+              <Title level={4}>👥 注册审批</Title>
+              <Text type="secondary">新用户需先提交申请，管理员审核后才能登录系统。</Text>
+            </div>
+            <Button
+              icon={<ReloadOutlined />}
+              onClick={() => {
+                void fetchRegistrationApplications();
+              }}
+              loading={registrationLoading}
+            >
+              刷新
+            </Button>
+          </div>
+          <Table
+            columns={registrationColumns}
+            dataSource={registrationRequests}
+            rowKey="requestId"
+            loading={registrationLoading}
+            pagination={false}
+            locale={{ emptyText: '暂无待审批的注册申请' }}
+          />
+        </Card>
+      )}
+
       {/* 文档列表 */}
       <Card>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
@@ -918,6 +1064,24 @@ const UploadPage: FC<UploadPageProps> = ({ uploadPassword, onPasswordInvalid }) 
       </Card>
 
 
+      <Modal
+        title="拒绝注册申请"
+        open={rejectModal.open}
+        onCancel={closeRejectModal}
+        onOk={handleRejectSubmit}
+        okText="确认拒绝"
+        cancelText="取消"
+        okButtonProps={{ loading: rejectSubmitting, disabled: !rejectModal.requestId }}
+      >
+        <Text type="secondary">可选填写拒绝原因：</Text>
+        <Input.TextArea
+          rows={3}
+          value={rejectModal.reason}
+          onChange={(event) => setRejectModal((prev) => ({ ...prev, reason: event.target.value }))}
+          placeholder="例如：不符合接入标准或账号信息重复"
+          style={{ marginTop: 8 }}
+        />
+      </Modal>
 
       {/* 元数据编辑弹窗 */}
       <MetadataEditModal

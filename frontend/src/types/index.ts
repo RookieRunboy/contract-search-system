@@ -101,3 +101,22 @@ export interface SearchFilters {
   customerCategoryLevel1?: string[];
   customerCategoryLevel2?: string[];
 }
+
+export type UserRole = 'normal' | 'admin';
+
+export interface AuthUser {
+  userId: string;
+  role: UserRole;
+  status?: string;
+  createdAt?: string;
+}
+
+export interface RegistrationRequestSummary {
+  requestId: string;
+  userId: string;
+  status: 'pending' | 'approved' | 'rejected';
+  submittedAt?: string | null;
+  reviewer?: string | null;
+  reviewedAt?: string | null;
+  decisionReason?: string | null;
+}

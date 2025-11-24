@@ -1,128 +1,101 @@
-import { useState } from 'react';
-import { Layout, Menu, Typography, Space, Modal, Input, message } from 'antd';
-import { FileSearchOutlined, UploadOutlined, RobotOutlined } from '@ant-design/icons';
+import { useEffect, useMemo, useState } from 'react';
+import { Layout, Menu, Typography, Space, Button, Spin, Tag } from 'antd';
+import { FileSearchOutlined, UploadOutlined, LogoutOutlined } from '@ant-design/icons';
 import SearchPage from './pages/SearchPage';
 import UploadPage from './pages/UploadPage';
+import LoginPage from './pages/LoginPage';
+import RegisterPage from './pages/RegisterPage';
+import { useAuth } from './contexts/AuthContext';
 import './App.css';
 
-const { Sider, Content } = Layout;
+const { Sider, Header, Content } = Layout;
 const { Title, Text } = Typography;
 
+type NavKey = 'search' | 'upload';
+
 function App() {
-  const [selectedKey, setSelectedKey] = useState('search');
-  const [uploadPassword, setUploadPassword] = useState<string | null>(null);
-  const [uploadAccessGranted, setUploadAccessGranted] = useState(false);
-  const [passwordModalVisible, setPasswordModalVisible] = useState(false);
-  const [passwordInput, setPasswordInput] = useState('');
-  const [passwordError, setPasswordError] = useState<string | null>(null);
-  const [pendingNavKey, setPendingNavKey] = useState<string | null>(null);
+  const { user, logout, initializing } = useAuth();
+  const [selectedKey, setSelectedKey] = useState<NavKey>('search');
+  const [authView, setAuthView] = useState<'login' | 'register'>('login');
 
-  const handleMenuClick = ({ key }: { key: string }) => {
-    if (key === 'upload' && !uploadAccessGranted) {
-      setPendingNavKey(key);
-      setPasswordModalVisible(true);
-      return;
-    }
-    setSelectedKey(key);
-  };
-
-  const handlePasswordConfirm = () => {
-    const trimmed = passwordInput.trim();
-    if (!trimmed) {
-      setPasswordError('请输入上传密码');
-      return;
-    }
-
-    setUploadPassword(trimmed);
-    setUploadAccessGranted(true);
-    setPasswordModalVisible(false);
-    setPasswordInput('');
-    setPasswordError(null);
-
-    if (pendingNavKey) {
-      setSelectedKey(pendingNavKey);
-      setPendingNavKey(null);
-    } else {
-      setSelectedKey('upload');
-    }
-  };
-
-  const handlePasswordCancel = () => {
-    setPasswordModalVisible(false);
-    setPasswordInput('');
-    setPasswordError(null);
-    setPendingNavKey(null);
-
-    if (!uploadAccessGranted) {
+  useEffect(() => {
+    if (user?.role !== 'admin' && selectedKey === 'upload') {
       setSelectedKey('search');
     }
+  }, [selectedKey, user?.role]);
+
+  const menuItems = useMemo(() => {
+    const items = [
+      {
+        key: 'search',
+        icon: <FileSearchOutlined style={{ fontSize: 16 }} />,
+        label: <span style={{ fontSize: 14, fontWeight: 500 }}>文档搜索</span>,
+      },
+    ];
+    if (user?.role === 'admin') {
+      items.push({
+        key: 'upload',
+        icon: <UploadOutlined style={{ fontSize: 16 }} />,
+        label: <span style={{ fontSize: 14, fontWeight: 500 }}>文档管理</span>,
+      });
+    }
+    return items;
+  }, [user?.role]);
+
+  const handleMenuClick = ({ key }: { key: string }) => {
+    setSelectedKey(key as NavKey);
   };
 
-  const handlePasswordInvalid = () => {
-    setUploadAccessGranted(false);
-    setUploadPassword(null);
-    setPendingNavKey('upload');
-    setPasswordModalVisible(true);
-    message.warning('上传密码已失效，请重新输入');
+  const handleLogout = () => {
+    logout();
+    setSelectedKey('search');
+    setAuthView('login');
   };
 
   const renderContent = () => {
+    if (!user) {
+      if (authView === 'register') {
+        return <RegisterPage onSwitchToLogin={() => setAuthView('login')} />;
+      }
+      return <LoginPage onSwitchToRegister={() => setAuthView('register')} />;
+    }
+
     switch (selectedKey) {
-      case 'search':
-        return <SearchPage />;
       case 'upload':
-        return uploadAccessGranted ? (
-          <UploadPage
-            uploadPassword={uploadPassword}
-            onPasswordInvalid={handlePasswordInvalid}
-          />
-        ) : (
-          <div style={{
-            padding: '48px',
-            textAlign: 'center',
-          }}
-          >
-            <Title level={3}>文档上传已锁定</Title>
-            <Text type="secondary">请通过左侧导航并输入上传密码后继续。</Text>
-          </div>
-        );
+        return user.role === 'admin' ? <UploadPage /> : <SearchPage />;
+      case 'search':
       default:
         return <SearchPage />;
     }
   };
 
+  const roleLabel = user?.role === 'admin' ? '管理员' : '普通用户';
+  const roleTagColor = user?.role === 'admin' ? 'blue' : 'green';
+
+  if (initializing) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Spin size="large" />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return renderContent();
+  }
+
   return (
-    <Layout>
-      <Sider width={280} theme="dark">
-        <div style={{ 
-          padding: '24px 16px', 
+    <Layout style={{ minHeight: '100vh' }}>
+      <Sider width={260} theme="dark">
+        <div style={{
+          padding: '24px 16px',
           textAlign: 'center',
           borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
           marginBottom: '16px'
         }}>
           <Space direction="vertical" size={8}>
-            <RobotOutlined style={{ 
-              fontSize: '32px', 
-              color: '#667eea',
-              filter: 'drop-shadow(0 4px 8px rgba(102, 126, 234, 0.3))'
-            }} />
-            <Title level={4} style={{ 
-              color: 'white', 
-              margin: 0,
-              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-              fontWeight: 600
-            }}>
-              合同智能检索
-            </Title>
-            <div style={{
-              fontSize: '12px',
-              color: 'rgba(255, 255, 255, 0.6)',
-              fontWeight: 300
-            }}>
-              AI-Powered Contract Search
-            </div>
+            <Title level={4} style={{ color: 'white', margin: 0 }}>合同智能检索</Title>
+            <Text style={{ color: 'rgba(255, 255, 255, 0.65)' }}>AI-Powered Contract Search</Text>
           </Space>
         </div>
         <Menu
@@ -130,52 +103,28 @@ function App() {
           mode="inline"
           selectedKeys={[selectedKey]}
           onClick={handleMenuClick}
-          style={{ paddingTop: '8px' }}
-          items={[
-            {
-              key: 'search',
-              icon: <FileSearchOutlined style={{ fontSize: '16px' }} />,
-              label: <span style={{ fontSize: '14px', fontWeight: 500 }}>文档搜索</span>,
-            },
-            {
-              key: 'upload',
-              icon: <UploadOutlined style={{ fontSize: '16px' }} />,
-              label: <span style={{ fontSize: '14px', fontWeight: 500 }}>文档上传</span>,
-            },
-          ]}
+          items={menuItems}
         />
       </Sider>
       <Layout>
+        <Header className="app-header">
+          <div className="app-user-meta">
+            <Text strong className="app-user-name">{user.userId}</Text>
+            <div className="app-user-role">
+              <Text type="secondary">当前角色：</Text>
+              <Tag color={roleTagColor}>
+                {roleLabel}
+              </Tag>
+            </div>
+          </div>
+          <Button type="text" icon={<LogoutOutlined />} onClick={handleLogout}>
+            退出登录
+          </Button>
+        </Header>
         <Content>
           {renderContent()}
         </Content>
       </Layout>
-      <Modal
-        title="请输入上传密码"
-        open={passwordModalVisible}
-        onOk={handlePasswordConfirm}
-        onCancel={handlePasswordCancel}
-        okText="确认"
-        cancelText="取消"
-        maskClosable={false}
-        destroyOnClose
-      >
-        <Input.Password
-          placeholder="请输入上传密码"
-          value={passwordInput}
-          autoFocus
-          onChange={(event) => {
-            setPasswordInput(event.target.value);
-            if (passwordError) {
-              setPasswordError(null);
-            }
-          }}
-          onPressEnter={handlePasswordConfirm}
-        />
-        {passwordError ? (
-          <Text type="danger" style={{ display: 'block', marginTop: 8 }}>{passwordError}</Text>
-        ) : null}
-      </Modal>
     </Layout>
   );
 }

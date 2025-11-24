@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { FC } from 'react';
-import { Input, Button, Card, List, Space, Typography, Empty, Spin, message, Badge, Tag, Checkbox, Progress, Collapse, DatePicker, InputNumber, Row, Col, Select } from 'antd';
+import { Input, Button, Card, List, Space, Typography, Empty, Spin, message, Badge, Tag, Checkbox, Progress, Collapse, DatePicker, InputNumber, Row, Col, Select, Tooltip } from 'antd';
 import { FileTextOutlined, ThunderboltOutlined, DownloadOutlined, CaretRightOutlined, FilterOutlined } from '@ant-design/icons';
 import { searchDocuments, downloadDocument } from '../services/api';
 import type { ContractSearchResult, ContractMetadata } from '../types/index';
@@ -8,6 +8,7 @@ import type { SearchFilters } from '../services/api';
 import MetadataEditModal from '../components/MetadataEditModal';
 import dayjs from 'dayjs';
 import '../styles/compact-date-picker.css';
+import { useAuth } from '../contexts/AuthContext';
 
 const { Title, Text } = Typography;
 const { Search } = Input;
@@ -24,6 +25,8 @@ const CHINASOFT_ENTITY_NAMES = [
 ];
 
 const SearchPage: FC = () => {
+  const { user } = useAuth();
+  const canDownload = user?.role === 'admin';
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<ContractSearchResult[]>([]);
   const [loading, setLoading] = useState(false);
@@ -190,6 +193,10 @@ const SearchPage: FC = () => {
   };
 
   const handleDownload = async (contractName: string) => {
+    if (!canDownload) {
+      message.warning('仅管理员可以下载合同，请联系管理员。');
+      return;
+    }
     try {
       // 确保文件名包含.pdf扩展名
       const fileName = contractName.endsWith('.pdf') ? contractName : `${contractName}.pdf`;
@@ -244,6 +251,10 @@ const SearchPage: FC = () => {
   const handleBatchDownload = async () => {
     if (selectedDocuments.size === 0) {
       message.warning('请先选择要下载的文档');
+      return;
+    }
+    if (!canDownload) {
+      message.warning('仅管理员可以下载合同，请联系管理员。');
       return;
     }
 
@@ -712,15 +723,17 @@ const SearchPage: FC = () => {
                   </Text>
                 </div>
               )}
-              <Button
-                type="primary"
-                icon={<DownloadOutlined />}
-                onClick={handleBatchDownload}
-                disabled={selectedDocuments.size === 0 || batchDownloading}
-                loading={batchDownloading}
-              >
-                批量导出 ({selectedDocuments.size})
-              </Button>
+              <Tooltip title={canDownload ? undefined : '仅管理员可下载合同'}>
+                <Button
+                  type="primary"
+                  icon={<DownloadOutlined />}
+                  onClick={handleBatchDownload}
+                  disabled={!canDownload || selectedDocuments.size === 0 || batchDownloading}
+                  loading={batchDownloading}
+                >
+                  批量导出 ({selectedDocuments.size})
+                </Button>
+              </Tooltip>
             </div>
           </div>
           <List
@@ -761,15 +774,18 @@ const SearchPage: FC = () => {
                             )}
                           </Space>
                         </div>
-                        <Button
-                          type="primary"
-                          size="small"
-                          icon={<DownloadOutlined />}
-                          onClick={() => handleDownload(contract.contract_name)}
-                          style={{ marginLeft: 'auto' }}
-                        >
-                          导出合同
-                        </Button>
+                        <Tooltip title={canDownload ? undefined : '仅管理员可下载合同'}>
+                          <Button
+                            type="primary"
+                            size="small"
+                            icon={<DownloadOutlined />}
+                            onClick={() => handleDownload(contract.contract_name)}
+                            style={{ marginLeft: 'auto' }}
+                            disabled={!canDownload}
+                          >
+                            导出合同
+                          </Button>
+                        </Tooltip>
                         <Space
                           wrap
                           size={[4, 4]}

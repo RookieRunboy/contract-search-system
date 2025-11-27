@@ -14,9 +14,6 @@ elasticsearch==8.11.0
 # PDF处理 - 统一使用OCR识别扫描件
 PyMuPDF==1.23.26
 
-# OCR识别 - 合同文字识别首选
-paddleocr==3.2.0
-
 # 图像处理
 opencv-python==4.6.0.66
 pdf2image==1.17.0

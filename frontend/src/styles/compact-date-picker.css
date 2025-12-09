@@ -1,0 +1,43 @@
+.compact-date-picker {
+  font-size: 12px !important;
+}
+
+.compact-date-picker .ant-picker-panel {
+  font-size: 12px !important;
+}
+
+.compact-date-picker .ant-picker-content {
+  font-size: 12px !important;
+}
+
+.compact-date-picker .ant-picker-cell {
+  font-size: 11px !important;
+  padding: 2px !important;
+  height: 20px !important;
+  line-height: 16px !important;
+}
+
+.compact-date-picker .ant-picker-header {
+  font-size: 12px !important;
+  padding: 4px 8px !important;
+}
+
+.compact-date-picker .ant-picker-header-view {
+  font-size: 12px !important;
+}
+
+.compact-date-picker .ant-picker-body {
+  padding: 4px !important;
+}
+
+.compact-date-picker .ant-picker-date-panel {
+  width: 240px !important;
+}
+
+.compact-date-picker .ant-picker-panel-container {
+  font-size: 12px !important;
+}
+
+.compact-date-picker .ant-picker-dropdown {
+  font-size: 12px !important;
+}

@@ -1,0 +1,24 @@
+# Web framework and API
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+pydantic>=2.7,<3.0
+python-multipart==0.0.6
+requests==2.31.0
+python-dotenv==1.0.1
+passlib[bcrypt]==1.7.4
+bcrypt==4.0.1
+python-jose==3.3.0
+
+# Search engine
+elasticsearch==8.11.0
+
+# PDF processing - using OCR for scanned documents
+PyMuPDF==1.23.26
+pdfplumber==0.11.4
+
+# Image processing
+opencv-python==4.6.0.66
+pdf2image==1.17.0
+Pillow==10.2.0
+numpy==1.26.4
+openpyxl==3.1.2

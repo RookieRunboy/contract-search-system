@@ -140,7 +140,7 @@ class AuthManager:
             self._users[root_user_id] = {
                 "user_id": root_user_id,
                 "password_hash": password_hash,
-                "role": "admin",
+                "role": "superadmin",
                 "status": "active",
                 "created_at": _utc_now_iso(),
             }
@@ -161,11 +161,35 @@ class AuthManager:
             return None
         with self._lock:
             user = self._users.get(user_id)
-            if not user or user.get("status") != "active":
+            if not user:
                 return None
             if not pwd_context.verify(password, user.get("password_hash", "")):
                 return None
+            if user.get("status") != "active":
+                return None
             return {k: v for k, v in user.items() if k != "password_hash"}
+
+    def authenticate_with_status(self, user_id: str, password: str) -> tuple[Optional[Dict[str, Any]], str]:
+        """Authenticate user and return (user_data, status_code).
+        
+        Returns:
+            (user_data, "success") if authentication succeeds
+            (None, "disabled") if user exists but is disabled
+            (None, "invalid") if user doesn't exist or password is wrong
+        """
+        if not user_id:
+            return None, "invalid"
+        with self._lock:
+            user = self._users.get(user_id)
+            if not user:
+                return None, "invalid"
+            if not pwd_context.verify(password, user.get("password_hash", "")):
+                return None, "invalid"
+            if user.get("status") == "disabled":
+                return None, "disabled"
+            if user.get("status") != "active":
+                return None, "invalid"
+            return {k: v for k, v in user.items() if k != "password_hash"}, "success"
 
     def create_user(self, user_id: str, password_hash: str, role: str = "normal") -> Dict[str, Any]:
         with self._lock:
@@ -181,6 +205,57 @@ class AuthManager:
             self._users[user_id] = record
             self._persist_users()
             return {k: v for k, v in record.items() if k != "password_hash"}
+
+    def list_all_users(self) -> List[Dict[str, Any]]:
+        """Return a list of all users (without password hashes)."""
+        with self._lock:
+            users = [
+                {
+                    "user_id": u["user_id"],
+                    "role": u.get("role", "normal"),
+                    "status": u.get("status", "active"),
+                    "created_at": u.get("created_at"),
+                }
+                for u in self._users.values()
+            ]
+        return sorted(users, key=lambda x: x.get("created_at") or "", reverse=True)
+
+    def update_user_role(self, user_id: str, new_role: str, requester: str) -> Dict[str, Any]:
+        """Update a user's role (superadmin only)."""
+        valid_roles = {"superadmin", "admin", "normal"}
+        if new_role not in valid_roles:
+            raise ValueError(f"无效角色: {new_role}")
+        with self._lock:
+            if user_id not in self._users:
+                raise ValueError("用户不存在")
+            user = self._users[user_id]
+            user["role"] = new_role
+            self._persist_users()
+            return {
+                "user_id": user_id,
+                "role": new_role,
+                "status": user.get("status"),
+            }
+
+    def update_user_status(self, user_id: str, new_status: str, requester: str) -> Dict[str, Any]:
+        """Update a user's status (superadmin only)."""
+        valid_statuses = {"active", "disabled"}
+        if new_status not in valid_statuses:
+            raise ValueError(f"无效状态: {new_status}")
+        with self._lock:
+            if user_id not in self._users:
+                raise ValueError("用户不存在")
+            user = self._users[user_id]
+            # Prevent disabling superadmin accounts
+            if user.get("role") == "superadmin" and new_status == "disabled":
+                raise ValueError("无法禁用超级管理员账户")
+            user["status"] = new_status
+            self._persist_users()
+            return {
+                "user_id": user_id,
+                "role": user.get("role"),
+                "status": new_status,
+            }
 
     # ------------------------
     # Registration workflow

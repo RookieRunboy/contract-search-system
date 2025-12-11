@@ -1,17 +1,31 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Layout, Menu, Typography, Space, Button, Spin, Tag } from 'antd';
-import { FileSearchOutlined, UploadOutlined, LogoutOutlined } from '@ant-design/icons';
+import { FileSearchOutlined, UploadOutlined, LogoutOutlined, TeamOutlined } from '@ant-design/icons';
 import SearchPage from './pages/SearchPage';
 import UploadPage from './pages/UploadPage';
+import PersonnelPage from './pages/PersonnelPage';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import { useAuth } from './contexts/AuthContext';
+import type { UserRole } from './types';
 import './App.css';
 
 const { Sider, Header, Content } = Layout;
 const { Title, Text } = Typography;
 
-type NavKey = 'search' | 'upload';
+type NavKey = 'search' | 'upload' | 'personnel';
+
+const ROLE_LABELS: Record<UserRole, string> = {
+  superadmin: '超级管理员',
+  admin: '管理员',
+  normal: '普通用户',
+};
+
+const ROLE_COLORS: Record<UserRole, string> = {
+  superadmin: 'purple',
+  admin: 'blue',
+  normal: 'green',
+};
 
 function App() {
   const { user, logout, initializing } = useAuth();
@@ -19,10 +33,17 @@ function App() {
   const [authView, setAuthView] = useState<'login' | 'register'>('login');
 
   useEffect(() => {
-    if (user?.role !== 'admin' && selectedKey === 'upload') {
-      setSelectedKey('search');
+    // Redirect to search if user doesn't have access to current page
+    if (user) {
+      const role = user.role;
+      if (selectedKey === 'upload' && role !== 'admin' && role !== 'superadmin') {
+        setSelectedKey('search');
+      }
+      if (selectedKey === 'personnel' && role !== 'superadmin') {
+        setSelectedKey('search');
+      }
     }
-  }, [selectedKey, user?.role]);
+  }, [selectedKey, user]);
 
   const menuItems = useMemo(() => {
     const items = [
@@ -32,11 +53,20 @@ function App() {
         label: <span style={{ fontSize: 14, fontWeight: 500 }}>文档搜索</span>,
       },
     ];
-    if (user?.role === 'admin') {
+    // Admin and superadmin can access document management
+    if (user?.role === 'admin' || user?.role === 'superadmin') {
       items.push({
         key: 'upload',
         icon: <UploadOutlined style={{ fontSize: 16 }} />,
         label: <span style={{ fontSize: 14, fontWeight: 500 }}>文档管理</span>,
+      });
+    }
+    // Only superadmin can access personnel management
+    if (user?.role === 'superadmin') {
+      items.push({
+        key: 'personnel',
+        icon: <TeamOutlined style={{ fontSize: 16 }} />,
+        label: <span style={{ fontSize: 14, fontWeight: 500 }}>人员管理</span>,
       });
     }
     return items;
@@ -61,16 +91,18 @@ function App() {
     }
 
     switch (selectedKey) {
+      case 'personnel':
+        return user.role === 'superadmin' ? <PersonnelPage /> : <SearchPage />;
       case 'upload':
-        return user.role === 'admin' ? <UploadPage /> : <SearchPage />;
+        return (user.role === 'admin' || user.role === 'superadmin') ? <UploadPage /> : <SearchPage />;
       case 'search':
       default:
         return <SearchPage />;
     }
   };
 
-  const roleLabel = user?.role === 'admin' ? '管理员' : '普通用户';
-  const roleTagColor = user?.role === 'admin' ? 'blue' : 'green';
+  const roleLabel = ROLE_LABELS[user?.role ?? 'normal'];
+  const roleTagColor = ROLE_COLORS[user?.role ?? 'normal'];
 
   if (initializing) {
     return (

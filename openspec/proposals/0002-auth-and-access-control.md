@@ -1,6 +1,6 @@
 # Proposal: 用户登录与权限控制
 
-- Status: Draft
+- Status: Implemented
 - Created: 2025-11-06
 - Author: Codex (AI 助手)
 - Owners: 平台开发组

@@ -102,13 +102,20 @@ export interface SearchFilters {
   customerCategoryLevel2?: string[];
 }
 
-export type UserRole = 'normal' | 'admin';
+export type UserRole = 'normal' | 'admin' | 'superadmin';
 
 export interface AuthUser {
   userId: string;
   role: UserRole;
   status?: string;
   createdAt?: string;
+}
+
+export interface UserRecord {
+  userId: string;
+  role: UserRole;
+  status?: string;
+  createdAt?: string | null;
 }
 
 export interface RegistrationRequestSummary {
@@ -120,3 +127,4 @@ export interface RegistrationRequestSummary {
   reviewedAt?: string | null;
   decisionReason?: string | null;
 }
+

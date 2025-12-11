@@ -94,6 +94,13 @@ class RegistrationDecision(BaseModel):
     reason: Optional[str] = Field(default=None, max_length=200)
 
 
+class UpdateRoleRequest(BaseModel):
+    role: str = Field(..., description="新角色: superadmin, admin, normal")
+
+
+class UpdateStatusRequest(BaseModel):
+    status: str = Field(..., description="新状态: active, disabled")
+
 def _create_access_token(user_id: str, role: str, expires_minutes: Optional[int] = None) -> str:
     lifetime = expires_minutes or ACCESS_TOKEN_EXPIRE_MINUTES
     expire = datetime.utcnow() + timedelta(minutes=lifetime)
@@ -122,8 +129,14 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(a
 
 
 def require_admin(current_user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
-    if current_user.get("role") != "admin":
+    if current_user.get("role") not in ("admin", "superadmin"):
         raise HTTPException(status_code=403, detail="需要管理员权限")
+    return current_user
+
+
+def require_superadmin(current_user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
+    if current_user.get("role") != "superadmin":
+        raise HTTPException(status_code=403, detail="需要超级管理员权限")
     return current_user
 
 
@@ -480,8 +493,15 @@ def _format_file_size(size_in_bytes: int) -> str:
 @app.post("/auth/login")
 async def login(payload: LoginRequest):
     normalized_id = payload.user_id.strip()
-    user = auth_manager.authenticate(normalized_id, payload.password)
-    if not user:
+    user, auth_status = auth_manager.authenticate_with_status(normalized_id, payload.password)
+    
+    if auth_status == "disabled":
+        raise HTTPException(
+            status_code=403,
+            detail={"message": "您的账号已被禁用，请联系相关同事解禁账号", "code": "account_disabled"}
+        )
+    
+    if auth_status != "success" or not user:
         raise HTTPException(status_code=401, detail="用户名或密码错误")
 
     token = _create_access_token(user["user_id"], user.get("role", "normal"))
@@ -546,6 +566,72 @@ async def reject_registration(
         "code": 200,
         "message": "已拒绝注册申请",
         "data": result,
+    }
+
+
+@app.get("/admin/users")
+async def list_users(current_user: Dict[str, Any] = Depends(require_superadmin)):
+    """获取所有用户列表（仅超级管理员）"""
+    users = auth_manager.list_all_users()
+    return {
+        "code": 200,
+        "message": "获取成功",
+        "data": users,
+    }
+
+
+@app.put("/admin/users/{user_id}/role")
+async def update_user_role(
+    user_id: str,
+    payload: UpdateRoleRequest,
+    current_user: Dict[str, Any] = Depends(require_superadmin),
+):
+    """修改用户角色（仅超级管理员）"""
+    try:
+        result = auth_manager.update_user_role(user_id, payload.role, current_user["user_id"])
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {
+        "code": 200,
+        "message": "角色更新成功",
+        "data": result,
+    }
+
+
+@app.put("/admin/users/{user_id}/status")
+async def update_user_status(
+    user_id: str,
+    payload: UpdateStatusRequest,
+    current_user: Dict[str, Any] = Depends(require_superadmin),
+):
+    """禁用或启用用户账户（仅超级管理员）"""
+    # Prevent self-disable
+    if user_id == current_user["user_id"] and payload.status == "disabled":
+        raise HTTPException(status_code=400, detail="无法禁用自己的账户")
+    try:
+        result = auth_manager.update_user_status(user_id, payload.status, current_user["user_id"])
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {
+        "code": 200,
+        "message": "已禁用账户" if payload.status == "disabled" else "已启用账户",
+        "data": result,
+    }
+
+
+@app.get("/customer-categories")
+async def get_customer_categories(
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    获取客户分类列表（层级结构）
+    Returns hierarchy: { level1: [level2_options...] }
+    """
+    hierarchy = metadata_extractor.customer_category_lookup.get_category_hierarchy()
+    return {
+        "code": 200,
+        "data": hierarchy,
+        "message": "success"
     }
 
 

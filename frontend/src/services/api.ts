@@ -93,8 +93,8 @@ export const normalizeSearchList = (rawList: unknown): ContractSearchResult[] =>
   // 处理后端返回的新格式：每个合同包含chunks数组和元数据信息
   if (firstItem && Array.isArray((firstItem as any).chunks)) {
     return rawList.map((item) => {
-      const contractItem = item as RawSearchChunk & { 
-        chunks: RawSearchChunk[]; 
+      const contractItem = item as RawSearchChunk & {
+        chunks: RawSearchChunk[];
         metadata_info?: any;
         metadata_score?: number;
         content_pages?: any[];
@@ -124,7 +124,7 @@ export const normalizeSearchList = (rawList: unknown): ContractSearchResult[] =>
             text: toStringValue(chunk.text ?? chunk.content) ?? '',
             highlights: (chunk.highlights && typeof chunk.highlights === 'object') ? (chunk.highlights as Record<string, any>) : {},
             metadata_highlights: (chunk as any).metadata_highlights,
-            })) as DocumentChunk[]
+          })) as DocumentChunk[]
           : Array.isArray(contractItem.content_pages)
             ? contractItem.content_pages.map((page) => ({
               score: toNumber(page.score),
@@ -211,13 +211,13 @@ export interface SearchFilters {
 }
 
 export const searchDocuments = async (
-  query: string, 
-  topK: number = 99, 
+  query: string,
+  topK: number = 99,
   filters?: SearchFilters
 ): Promise<ContractSearchResult[]> => {
   // 构建查询参数
   const params: any = { query, top_k: topK };
-  
+
   // 添加筛选参数
   if (filters?.amountMin !== undefined) {
     params.amount_min = filters.amountMin;
@@ -403,5 +403,19 @@ export const saveMetadata = async (filename: string, metadata: ContractMetadata)
 
 // 别名函数，保持向后兼容
 export const getDocumentList = getUploadedDocuments;
+
+// 获取客户分类层级结构
+export const getCustomerCategories = async (): Promise<Record<string, string[]>> => {
+  try {
+    const response: any = await api.get('/customer-categories');
+    if (response?.data && typeof response.data === 'object') {
+      return response.data as Record<string, string[]>;
+    }
+    return {};
+  } catch (error: any) {
+    console.error('Failed to load customer categories:', error);
+    return {};
+  }
+};
 
 export default api;

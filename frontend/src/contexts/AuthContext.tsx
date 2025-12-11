@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { message } from 'antd';
+import { message, Modal } from 'antd';
 import type { ReactNode } from 'react';
 import type { AuthUser } from '../types';
 import { login as loginApi } from '../services/auth';
@@ -65,8 +65,18 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setUser(normalizedUser);
       setToken(response.access_token);
     } catch (error: any) {
-      const detail = error?.response?.data?.detail || error?.response?.data?.message || error?.message || '登录失败，请稍后重试';
-      message.error(detail);
+      const errorData = error?.response?.data?.detail;
+      // Check if this is an account disabled error
+      if (errorData && typeof errorData === 'object' && errorData.code === 'account_disabled') {
+        Modal.error({
+          title: '账号已禁用',
+          content: errorData.message || '您的账号已被禁用，请联系相关同事解禁账号',
+          okText: '确定',
+        });
+      } else {
+        const detail = (typeof errorData === 'string' ? errorData : errorData?.message) || error?.message || '登录失败，请稍后重试';
+        message.error(detail);
+      }
       throw error;
     } finally {
       setAuthenticating(false);

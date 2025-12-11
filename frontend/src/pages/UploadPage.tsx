@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from 'react';
 import type { FC, ReactNode } from 'react';
 import {
   Upload,
-  Input,
   Button,
   Card,
   Table,
@@ -35,9 +34,8 @@ import {
   CloudUploadOutlined,
 } from '@ant-design/icons';
 import { API_BASE_URL, deleteDocument, getUploadedDocuments, getDocumentDetail, downloadDocument } from '../services/api';
-import { fetchPendingRegistrations, approveRegistration as approveRegistrationRequest, rejectRegistration as rejectRegistrationRequest } from '../services/auth';
 import MetadataEditModal from '../components/MetadataEditModal';
-import type { ContractMetadata, RegistrationRequestSummary } from '../types';
+import type { ContractMetadata } from '../types';
 import type { ColumnsType } from 'antd/es/table';
 import type { UploadChangeParam } from 'antd/es/upload';
 import type { UploadFile } from 'antd/es/upload/interface';
@@ -280,23 +278,13 @@ interface DocumentDetail {
 }
 
 const UploadPage: FC = () => {
-  const { token, user, logout } = useAuth();
-  const isAdmin = user?.role === 'admin';
+  const { token, logout } = useAuth();
   const [uploading, setUploading] = useState(false);
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [currentMetadata, setCurrentMetadata] = useState<ContractMetadata | null>(null);
   const [metadataModalVisible, setMetadataModalVisible] = useState(false);
-  const [registrationRequests, setRegistrationRequests] = useState<RegistrationRequestSummary[]>([]);
-  const [registrationLoading, setRegistrationLoading] = useState(false);
-  const [processingRequestId, setProcessingRequestId] = useState<string | null>(null);
-  const [rejectSubmitting, setRejectSubmitting] = useState(false);
-  const [rejectModal, setRejectModal] = useState<{ open: boolean; requestId: string | null; reason: string }>({
-    open: false,
-    requestId: null,
-    reason: '',
-  });
- 
+
   // 详情视图相关状态
   const [selectedContractKey, setSelectedContractKey] = useState<string | null>(null);
   const [detailLoading, setDetailLoading] = useState<boolean>(false);
@@ -306,100 +294,6 @@ const UploadPage: FC = () => {
   const [deletePopoverKey, setDeletePopoverKey] = useState<string | null>(null);
   const [deleteLoadingKey, setDeleteLoadingKey] = useState<string | null>(null);
   const [downloadingKey, setDownloadingKey] = useState<string | null>(null);
-
-  const resolveApiError = useCallback((error: unknown, fallback: string): string => {
-    if (error && typeof error === 'object' && 'response' in error) {
-      const response = (error as { response?: { data?: { detail?: string; message?: string } } }).response;
-      const detailMessage = response?.data?.detail ?? response?.data?.message;
-      if (typeof detailMessage === 'string' && detailMessage.trim()) {
-        return detailMessage;
-      }
-    }
-    if (error instanceof Error && error.message) {
-      return error.message;
-    }
-    return fallback;
-  }, []);
-
-  const normalizeRegistrationRecord = (record: Record<string, any>): RegistrationRequestSummary => ({
-    requestId: String(record.request_id ?? record.requestId ?? ''),
-    userId: String(record.user_id ?? record.userId ?? ''),
-    status: (record.status ?? 'pending') as RegistrationRequestSummary['status'],
-    submittedAt: record.submitted_at ?? record.submittedAt ?? null,
-    reviewer: record.reviewer ?? null,
-    reviewedAt: record.reviewed_at ?? record.reviewedAt ?? null,
-    decisionReason: record.decision_reason ?? record.decisionReason ?? null,
-  });
-
-  const fetchRegistrationApplications = useCallback(async () => {
-    if (!isAdmin) {
-      setRegistrationRequests([]);
-      return;
-    }
-    setRegistrationLoading(true);
-    try {
-      const response = await fetchPendingRegistrations();
-      const rawList: unknown[] = Array.isArray((response as any)?.data)
-        ? (response as any).data
-        : Array.isArray(response)
-          ? response
-          : [];
-      const normalized = rawList
-        .filter((item): item is Record<string, any> => Boolean(item) && typeof item === 'object')
-        .map((item) => normalizeRegistrationRecord(item));
-      setRegistrationRequests(normalized);
-    } catch (error) {
-      message.error(resolveApiError(error, '获取注册申请列表失败'));
-    } finally {
-      setRegistrationLoading(false);
-    }
-  }, [isAdmin, resolveApiError]);
-
-  const handleApproveRegistration = async (request: RegistrationRequestSummary) => {
-    setProcessingRequestId(request.requestId);
-    try {
-      await approveRegistrationRequest(request.requestId);
-      message.success(`已通过 ${request.userId} 的注册申请`);
-      await fetchRegistrationApplications();
-    } catch (error) {
-      message.error(resolveApiError(error, '审批失败，请稍后重试'));
-    } finally {
-      setProcessingRequestId(null);
-    }
-  };
-
-  const openRejectModal = (request: RegistrationRequestSummary) => {
-    setRejectModal({
-      open: true,
-      requestId: request.requestId,
-      reason: '',
-    });
-  };
-
-  const closeRejectModal = () => {
-    setRejectModal({
-      open: false,
-      requestId: null,
-      reason: '',
-    });
-  };
-
-  const handleRejectSubmit = async () => {
-    if (!rejectModal.requestId) {
-      return;
-    }
-    setRejectSubmitting(true);
-    try {
-      await rejectRegistrationRequest(rejectModal.requestId, rejectModal.reason?.trim() || undefined);
-      message.success('已拒绝注册申请');
-      closeRejectModal();
-      await fetchRegistrationApplications();
-    } catch (error) {
-      message.error(resolveApiError(error, '操作失败，请稍后重试'));
-    } finally {
-      setRejectSubmitting(false);
-    }
-  };
 
   // 获取文档列表
   const fetchDocuments = useCallback(async (silent = false) => {
@@ -547,7 +441,7 @@ const UploadPage: FC = () => {
   const handleViewMetadata = async (contractKey: string) => {
     try {
       const fileName = `${contractKey}.pdf`;
-      
+
       // 找到对应的文档记录，获取准确的文件名信息
       const documentRecord = documents.find(d => d.contractKey === contractKey);
       const actualFileName = documentRecord?.fileName || fileName;
@@ -558,13 +452,13 @@ const UploadPage: FC = () => {
       const rawMetadata = detail?.document_metadata ?? detail?.structuredData ?? detail?.structured_data;
       const metadataObject = (rawMetadata && typeof rawMetadata === 'object') ? rawMetadata as Record<string, unknown> : null;
       const normalizedMetadata = normalizeContractMetadata(metadataObject, actualFileName);
-      
+
       // 确保元数据包含正确的contractKey信息，用于onSaved回调匹配
       if (normalizedMetadata) {
         normalizedMetadata.contractKey = contractKey;
         normalizedMetadata.fileName = actualFileName;
       }
-      
+
       setCurrentMetadata(normalizedMetadata);
       setMetadataModalVisible(true);
     } catch (error) {
@@ -771,23 +665,23 @@ const UploadPage: FC = () => {
       render: (_, record) => (
         <Space size="small">
           <Tooltip title="查看详情" mouseEnterDelay={0.5} mouseLeaveDelay={0.1} destroyOnHidden trigger={["hover"]} getPopupContainer={() => document.body}>
-            <Button 
-              type="text" 
-              icon={<EyeOutlined />} 
+            <Button
+              type="text"
+              icon={<EyeOutlined />}
               onClick={() => showDetail(record)}
             />
           </Tooltip>
           <Tooltip title="查看元数据" mouseEnterDelay={0.5} mouseLeaveDelay={0.1} destroyOnHidden trigger={["hover"]} getPopupContainer={() => document.body}>
-            <Button 
-              type="text" 
-              icon={<ExperimentOutlined />} 
+            <Button
+              type="text"
+              icon={<ExperimentOutlined />}
               onClick={() => handleViewMetadata(record.contractKey)}
             />
           </Tooltip>
           <Tooltip title="下载文档" mouseEnterDelay={0.5} mouseLeaveDelay={0.1} destroyOnHidden trigger={["hover"]} getPopupContainer={() => document.body}>
-            <Button 
-              type="text" 
-              icon={<DownloadOutlined />} 
+            <Button
+              type="text"
+              icon={<DownloadOutlined />}
               loading={downloadingKey === record.contractKey}
               onClick={() => handleDownloadDocument(record)}
             />
@@ -804,7 +698,7 @@ const UploadPage: FC = () => {
             }}
             onConfirm={() => handleDelete(record)}
           >
-            <Button 
+            <Button
               type="text"
               icon={<DeleteOutlined />}
               danger
@@ -816,52 +710,10 @@ const UploadPage: FC = () => {
     },
   ];
 
-  const registrationColumns: ColumnsType<RegistrationRequestSummary> = [
-    {
-      title: '申请账号',
-      dataIndex: 'userId',
-      key: 'userId',
-      render: (text: string) => <Text strong>{text}</Text>,
-    },
-    {
-      title: '提交时间',
-      dataIndex: 'submittedAt',
-      key: 'submittedAt',
-      render: (value?: string | null) => <Text type="secondary">{formatDateTimeDisplay(value)}</Text>,
-    },
-    {
-      title: '操作',
-      key: 'actions',
-      render: (_: unknown, record) => (
-        <Space>
-          <Button
-            type="primary"
-            size="small"
-            onClick={() => handleApproveRegistration(record)}
-            loading={processingRequestId === record.requestId}
-          >
-            同意
-          </Button>
-          <Button
-            danger
-            size="small"
-            onClick={() => openRejectModal(record)}
-            disabled={processingRequestId === record.requestId}
-          >
-            拒绝
-          </Button>
-        </Space>
-      ),
-    },
-  ];
 
   useEffect(() => {
     fetchDocuments();
   }, [fetchDocuments]);
-
-  useEffect(() => {
-    fetchRegistrationApplications();
-  }, [fetchRegistrationApplications]);
 
   useEffect(() => {
     if (!documents.length) {
@@ -1006,41 +858,13 @@ const UploadPage: FC = () => {
         {uploading && <Progress percent={50} status="active" />}
       </Card>
 
-      {isAdmin && (
-        <Card style={{ marginBottom: '24px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-            <div>
-              <Title level={4}>👥 注册审批</Title>
-              <Text type="secondary">新用户需先提交申请，管理员审核后才能登录系统。</Text>
-            </div>
-            <Button
-              icon={<ReloadOutlined />}
-              onClick={() => {
-                void fetchRegistrationApplications();
-              }}
-              loading={registrationLoading}
-            >
-              刷新
-            </Button>
-          </div>
-          <Table
-            columns={registrationColumns}
-            dataSource={registrationRequests}
-            rowKey="requestId"
-            loading={registrationLoading}
-            pagination={false}
-            locale={{ emptyText: '暂无待审批的注册申请' }}
-          />
-        </Card>
-      )}
-
       {/* 文档列表 */}
       <Card>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
           <Title level={4}>📋 合同列表</Title>
           <Space>
-            <Button 
-              icon={<ReloadOutlined />} 
+            <Button
+              icon={<ReloadOutlined />}
               onClick={() => {
                 void fetchDocuments();
               }}
@@ -1050,7 +874,7 @@ const UploadPage: FC = () => {
             </Button>
           </Space>
         </div>
-        
+
         <Table
           columns={columns}
           dataSource={documents}
@@ -1064,26 +888,6 @@ const UploadPage: FC = () => {
           }}
         />
       </Card>
-
-
-      <Modal
-        title="拒绝注册申请"
-        open={rejectModal.open}
-        onCancel={closeRejectModal}
-        onOk={handleRejectSubmit}
-        okText="确认拒绝"
-        cancelText="取消"
-        okButtonProps={{ loading: rejectSubmitting, disabled: !rejectModal.requestId }}
-      >
-        <Text type="secondary">可选填写拒绝原因：</Text>
-        <Input.TextArea
-          rows={3}
-          value={rejectModal.reason}
-          onChange={(event) => setRejectModal((prev) => ({ ...prev, reason: event.target.value }))}
-          placeholder="例如：不符合接入标准或账号信息重复"
-          style={{ marginTop: 8 }}
-        />
-      </Modal>
 
       {/* 元数据编辑弹窗 */}
       <MetadataEditModal
@@ -1099,24 +903,24 @@ const UploadPage: FC = () => {
               if (m.contractKey && d.contractKey === m.contractKey) {
                 return { ...d, metadataExtracted: true, metadataStatus: 'extracted' };
               }
-              
+
               // 备用匹配方式：通过文件名匹配
               if (m.fileName && (d.fileName === m.fileName || d.contractKey === m.fileName.replace(/\.pdf$/i, ''))) {
                 return { ...d, metadataExtracted: true, metadataStatus: 'extracted' };
               }
-              
+
               // 最后尝试通过contract_name匹配
               if (m.contract_name) {
-                const isMatch = 
+                const isMatch =
                   d.fileName === m.contract_name ||
                   d.name === m.contract_name ||
                   d.contractKey === m.contract_name.replace(/\.pdf$/i, '');
-                
+
                 if (isMatch) {
                   return { ...d, metadataExtracted: true, metadataStatus: 'extracted' };
                 }
               }
-              
+
               return d;
             }));
           }

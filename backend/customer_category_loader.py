@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import threading
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 import re
 
 CustomerCategory = Tuple[Optional[str], Optional[str]]
@@ -55,6 +55,38 @@ class CustomerCategoryLookup:
 
         self._ensure_loaded()
         return self._mapping.get(key, (None, None))
+
+    def get_all_level1_categories(self) -> List[str]:
+        """Return all unique level 1 categories."""
+        self._ensure_loaded()
+        level1_set = {cat[0] for cat in self._mapping.values() if cat[0]}
+        return sorted(level1_set)
+
+    def get_all_level2_categories(self, level1: Optional[str] = None) -> List[str]:
+        """Return level 2 categories, optionally filtered by level 1."""
+        self._ensure_loaded()
+        level2_set = set()
+        for cat in self._mapping.values():
+            if level1 is None or cat[0] == level1:
+                if cat[1]:
+                    level2_set.add(cat[1])
+        return sorted(level2_set)
+
+    def get_category_hierarchy(self) -> Dict[str, List[str]]:
+        """Return hierarchical mapping of level1 -> [level2 options]."""
+        self._ensure_loaded()
+        hierarchy: Dict[str, List[str]] = {}
+        for cat in self._mapping.values():
+            level1, level2 = cat
+            if level1:
+                if level1 not in hierarchy:
+                    hierarchy[level1] = []
+                if level2 and level2 not in hierarchy[level1]:
+                    hierarchy[level1].append(level2)
+        # Sort for consistent display
+        for key in hierarchy:
+            hierarchy[key].sort()
+        return {k: hierarchy[k] for k in sorted(hierarchy.keys())}
 
     def refresh(self) -> None:
         """外部触发的强制刷新。"""

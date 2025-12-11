@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import type { FC } from 'react';
 import { Input, Button, Card, List, Space, Typography, Empty, Spin, message, Badge, Tag, Checkbox, Progress, Collapse, DatePicker, InputNumber, Row, Col, Select, Tooltip } from 'antd';
 import { FileTextOutlined, ThunderboltOutlined, DownloadOutlined, CaretRightOutlined, FilterOutlined } from '@ant-design/icons';
-import { searchDocuments, downloadDocument } from '../services/api';
+import { searchDocuments, downloadDocument, getCustomerCategories } from '../services/api';
 import type { ContractSearchResult, ContractMetadata } from '../types/index';
 import type { SearchFilters } from '../services/api';
 import MetadataEditModal from '../components/MetadataEditModal';
@@ -45,8 +45,18 @@ const SearchPage: FC = () => {
   const [amountMin, setAmountMin] = useState<number | null>(null);
   const [amountMax, setAmountMax] = useState<number | null>(null);
   const [ourEntityFilter, setOurEntityFilter] = useState<string | null>(null);
-  const [customerCategoryLevel1Filter, setCustomerCategoryLevel1Filter] = useState<string[]>([]);
-  const [customerCategoryLevel2Filter, setCustomerCategoryLevel2Filter] = useState<string[]>([]);
+  const [customerCategoryLevel1Filter, setCustomerCategoryLevel1Filter] = useState<string | null>(null);
+  const [customerCategoryLevel2Filter, setCustomerCategoryLevel2Filter] = useState<string | null>(null);
+  const [categoryHierarchy, setCategoryHierarchy] = useState<Record<string, string[]>>({});
+
+  // Load customer categories on mount
+  useEffect(() => {
+    const loadCategories = async () => {
+      const hierarchy = await getCustomerCategories();
+      setCategoryHierarchy(hierarchy);
+    };
+    loadCategories();
+  }, []);
 
 
   const handleSearch = async () => {
@@ -72,11 +82,11 @@ const SearchPage: FC = () => {
       if (ourEntityFilter) {
         filters.ourEntity = ourEntityFilter;
       }
-      if (customerCategoryLevel1Filter.length > 0) {
-        filters.customerCategoryLevel1 = customerCategoryLevel1Filter;
+      if (customerCategoryLevel1Filter) {
+        filters.customerCategoryLevel1 = [customerCategoryLevel1Filter];
       }
-      if (customerCategoryLevel2Filter.length > 0) {
-        filters.customerCategoryLevel2 = customerCategoryLevel2Filter;
+      if (customerCategoryLevel2Filter) {
+        filters.customerCategoryLevel2 = [customerCategoryLevel2Filter];
       }
 
       const results = await searchDocuments(searchQuery, topK, filters);
@@ -95,11 +105,11 @@ const SearchPage: FC = () => {
 
   const highlightText = (text: string, query: string) => {
     if (!query) return text;
-    
+
     const regex = new RegExp(`(${query})`, 'gi');
     const parts = text.split(regex);
-    
-    return parts.map((part, index) => 
+
+    return parts.map((part, index) =>
       regex.test(part) ? (
         <span key={index} className="highlight">{part}</span>
       ) : (
@@ -111,13 +121,13 @@ const SearchPage: FC = () => {
   // 元数据高亮函数
   const highlightMetadataText = (text: string, highlights?: string[]) => {
     if (!highlights || highlights.length === 0) return text;
-    
+
     let highlightedText = text;
     highlights.forEach((keyword) => {
       const regex = new RegExp(`(${keyword})`, 'gi');
       highlightedText = highlightedText.replace(regex, '<mark style="background-color: #fff2e6; color: #d46b08; padding: 1px 2px; border-radius: 2px;">$1</mark>');
     });
-    
+
     return <span dangerouslySetInnerHTML={{ __html: highlightedText }} />;
   };
 
@@ -160,13 +170,6 @@ const SearchPage: FC = () => {
     return null;
   };
 
-  const normalizeTagValues = (values: (string | number)[]): string[] => {
-    const normalized = values
-      .map((item) => (typeof item === 'string' ? item.trim() : String(item).trim()))
-      .filter((item): item is string => item.length > 0);
-    return Array.from(new Set(normalized));
-  };
-
   const formatAmountDisplay = (amount: number | null): string => {
     if (amount === null || amount === undefined || Number.isNaN(amount)) {
       return '暂无签订金额';
@@ -201,7 +204,7 @@ const SearchPage: FC = () => {
       // 确保文件名包含.pdf扩展名
       const fileName = contractName.endsWith('.pdf') ? contractName : `${contractName}.pdf`;
       const blob = await downloadDocument(fileName);
-      
+
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.style.display = 'none';
@@ -211,7 +214,7 @@ const SearchPage: FC = () => {
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
-      
+
       message.success('文件下载成功');
     } catch (error) {
       console.error('下载失败:', error);
@@ -260,17 +263,17 @@ const SearchPage: FC = () => {
 
     setBatchDownloading(true);
     setDownloadProgress(0);
-    
+
     try {
       const documentsArray = Array.from(selectedDocuments);
       const total = documentsArray.length;
-      
+
       for (let i = 0; i < total; i++) {
         const contractName = documentsArray[i];
         try {
           const fileName = contractName.endsWith('.pdf') ? contractName : `${contractName}.pdf`;
           const blob = await downloadDocument(fileName);
-          
+
           const url = window.URL.createObjectURL(blob);
           const a = document.createElement('a');
           a.style.display = 'none';
@@ -280,10 +283,10 @@ const SearchPage: FC = () => {
           a.click();
           window.URL.revokeObjectURL(url);
           document.body.removeChild(a);
-          
+
           // 更新进度
           setDownloadProgress(Math.round(((i + 1) / total) * 100));
-          
+
           // 添加延迟避免浏览器阻止多个下载
           if (i < total - 1) {
             await new Promise(resolve => setTimeout(resolve, 500));
@@ -293,7 +296,7 @@ const SearchPage: FC = () => {
           message.error(`文件 ${contractName} 下载失败`);
         }
       }
-      
+
       message.success(`成功下载 ${total} 个文件`);
       setSelectedDocuments(new Set()); // 清空选中状态
     } catch (error) {
@@ -466,7 +469,7 @@ const SearchPage: FC = () => {
               <Text type="secondary" className="search-subtitle">基于AI技术的合同文档智能检索系统</Text>
             </div>
           </div>
-          
+
           <div className="search-input-container">
             <Search
               placeholder="请输入搜索关键词，如：合同条款、责任义务、付款方式等..."
@@ -474,8 +477,8 @@ const SearchPage: FC = () => {
               onChange={(e) => setSearchQuery(e.target.value)}
               onSearch={handleSearch}
               enterButton={
-                <Button 
-                  type="primary" 
+                <Button
+                  type="primary"
                   icon={<ThunderboltOutlined />}
                   size="large"
                   className="search-button"
@@ -497,7 +500,7 @@ const SearchPage: FC = () => {
               type="text"
               icon={<FilterOutlined />}
               onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
-              style={{ 
+              style={{
                 padding: '4px 8px',
                 height: 'auto',
                 color: '#667eea',
@@ -506,7 +509,7 @@ const SearchPage: FC = () => {
             >
               高级筛选 {showAdvancedFilters ? '▲' : '▼'}
             </Button>
-            
+
             {showAdvancedFilters && (
               <div style={{
                 marginTop: '12px',
@@ -605,17 +608,19 @@ const SearchPage: FC = () => {
                       <Typography.Text strong>客户分类（一级）</Typography.Text>
                     </div>
                     <Select
-                      mode="tags"
                       allowClear
-                      placeholder="请输入或选择客户分类一级"
+                      placeholder="全部分类"
                       style={{ width: '100%' }}
                       value={customerCategoryLevel1Filter}
-                      onChange={(values) => {
-                        const normalized = normalizeTagValues(values);
-                        setCustomerCategoryLevel1Filter(normalized);
+                      onChange={(value: string | undefined) => {
+                        setCustomerCategoryLevel1Filter(value || null);
+                        // Clear level 2 when level 1 changes
+                        setCustomerCategoryLevel2Filter(null);
                       }}
-                      tokenSeparators={[',', '，', ';', '；', ' ']}
-                      options={customerCategoryLevel1Filter.map((value) => ({ label: value, value }))}
+                      options={Object.keys(categoryHierarchy).map((cat) => ({
+                        label: cat,
+                        value: cat
+                      }))}
                     />
                   </Col>
                   <Col xs={24} sm={12}>
@@ -623,21 +628,24 @@ const SearchPage: FC = () => {
                       <Typography.Text strong>客户分类（二级）</Typography.Text>
                     </div>
                     <Select
-                      mode="tags"
                       allowClear
-                      placeholder="请输入或选择客户分类二级"
+                      placeholder="全部分类"
                       style={{ width: '100%' }}
                       value={customerCategoryLevel2Filter}
-                      onChange={(values) => {
-                        const normalized = normalizeTagValues(values);
-                        setCustomerCategoryLevel2Filter(normalized);
-                      }}
-                      tokenSeparators={[',', '，', ';', '；', ' ']}
-                      options={customerCategoryLevel2Filter.map((value) => ({ label: value, value }))}
+                      onChange={(value: string | undefined) => setCustomerCategoryLevel2Filter(value || null)}
+                      disabled={!customerCategoryLevel1Filter}
+                      options={
+                        customerCategoryLevel1Filter && categoryHierarchy[customerCategoryLevel1Filter]
+                          ? categoryHierarchy[customerCategoryLevel1Filter].map((cat) => ({
+                            label: cat,
+                            value: cat
+                          }))
+                          : []
+                      }
                     />
                   </Col>
                 </Row>
-                
+
                 <div style={{ marginTop: '12px', textAlign: 'right' }}>
                   <Button
                     size="small"
@@ -647,8 +655,8 @@ const SearchPage: FC = () => {
                       setAmountMax(null);
                       setTopK(99);
                       setOurEntityFilter(null);
-                      setCustomerCategoryLevel1Filter([]);
-                      setCustomerCategoryLevel2Filter([]);
+                      setCustomerCategoryLevel1Filter(null);
+                      setCustomerCategoryLevel2Filter(null);
                     }}
                     style={{ marginRight: '8px' }}
                   >
@@ -679,17 +687,17 @@ const SearchPage: FC = () => {
               <FileTextOutlined style={{ marginRight: '8px', color: '#667eea' }} />
               搜索结果
             </Title>
-            <Badge 
-              count={`${searchResults.length} 条结果`} 
-              className="results-badge" 
+            <Badge
+              count={`${searchResults.length} 条结果`}
+              className="results-badge"
             />
           </div>
-          
+
           {/* 批量操作控制区域 */}
-          <div style={{ 
-            marginBottom: '16px', 
-            padding: '12px', 
-            background: '#f8f9fa', 
+          <div style={{
+            marginBottom: '16px',
+            padding: '12px',
+            background: '#f8f9fa',
             borderRadius: '8px',
             display: 'flex',
             alignItems: 'center',
@@ -709,13 +717,13 @@ const SearchPage: FC = () => {
                 已选择 {selectedDocuments.size} / {getUniqueDocuments().length} 个文档
               </Text>
             </div>
-            
+
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               {batchDownloading && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: '120px' }}>
-                  <Progress 
-                    percent={downloadProgress} 
-                    size="small" 
+                  <Progress
+                    percent={downloadProgress}
+                    size="small"
                     style={{ minWidth: '80px' }}
                   />
                   <Text type="secondary" style={{ fontSize: '12px' }}>
@@ -795,13 +803,13 @@ const SearchPage: FC = () => {
                             alignItems: 'center'
                           }}
                         >
-                          <Tag 
+                          <Tag
                             color={scoreTag.color}
                             className="result-score-tag"
                           >
                             {scoreTag.text}
                           </Tag>
-                          <Text 
+                          <Text
                             className="result-score-text"
                             style={{ color: getScoreColor(contract.score) }}
                           >
@@ -814,7 +822,7 @@ const SearchPage: FC = () => {
                             合同金额: {amountDisplay}
                           </Tag>
                           {contract.metadata_score && contract.metadata_score > 0 && (
-                            <Text 
+                            <Text
                               style={{ color: '#722ed1', fontSize: '12px' }}
                             >
                               (元数据: {contract.metadata_score.toFixed(1)})
@@ -826,16 +834,16 @@ const SearchPage: FC = () => {
                   >
                     {/* 元数据信息展示区域 */}
                     {contract.metadata_info && (
-                      <div style={{ 
-                        marginBottom: '16px', 
-                        padding: '12px', 
-                        background: '#f8f9fa', 
+                      <div style={{
+                        marginBottom: '16px',
+                        padding: '12px',
+                        background: '#f8f9fa',
                         borderRadius: '8px',
                         border: '1px solid #e9ecef'
                       }}>
-                        <div style={{ 
-                          display: 'flex', 
-                          alignItems: 'center', 
+                        <div style={{
+                          display: 'flex',
+                          alignItems: 'center',
                           marginBottom: '8px',
                           gap: '8px'
                         }}>
@@ -846,87 +854,87 @@ const SearchPage: FC = () => {
                             </Tag>
                           )}
                         </div>
-                        <div style={{ 
-                           display: 'grid', 
-                           gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', 
-                           gap: '8px',
-                           fontSize: '13px'
-                         }}>
+                        <div style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                          gap: '8px',
+                          fontSize: '13px'
+                        }}>
                           {(contract.metadata_info.customer_name || contract.metadata_info.party_a) && (
-                          <div>
-                            <Text type="secondary">客户名称：</Text>
-                            <Text>
-                              {highlightMetadataText(
-                                  contract.metadata_info.customer_name ?? contract.metadata_info.party_a ?? '', 
+                            <div>
+                              <Text type="secondary">客户名称：</Text>
+                              <Text>
+                                {highlightMetadataText(
+                                  contract.metadata_info.customer_name ?? contract.metadata_info.party_a ?? '',
                                   Array.from(new Set([
                                     ...getMetadataHighlights(contract, 'customer_name'),
                                     ...getMetadataHighlights(contract, 'party_a'),
                                   ]))
                                 )}
-                               </Text>
-                             </div>
-                           )}
+                              </Text>
+                            </div>
+                          )}
                           {(contract.metadata_info.our_entity || contract.metadata_info.party_b) && (
-                          <div>
-                            <Text type="secondary">我方实体：</Text>
-                            <Text>
-                              {highlightMetadataText(
-                                  contract.metadata_info.our_entity ?? contract.metadata_info.party_b ?? '', 
+                            <div>
+                              <Text type="secondary">我方实体：</Text>
+                              <Text>
+                                {highlightMetadataText(
+                                  contract.metadata_info.our_entity ?? contract.metadata_info.party_b ?? '',
                                   Array.from(new Set([
                                     ...getMetadataHighlights(contract, 'our_entity'),
                                     ...getMetadataHighlights(contract, 'party_b'),
                                   ]))
                                 )}
-                               </Text>
-                             </div>
-                           )}
-                           {(contract.metadata_info.customer_category_level1 || contract.metadata_info.customer_category_level2 || contract.metadata_info.contract_type) && (
-                             <div>
-                               <Text type="secondary">客户分类：</Text>
-                               <Text>
-                                 {(() => {
-                                   const parts = [
-                                     contract.metadata_info.customer_category_level1 ?? contract.metadata_info.contract_type,
-                                     contract.metadata_info.customer_category_level2 || undefined,
-                                   ].filter((item): item is string => Boolean(item));
-                                   const text = parts.length > 0 ? parts.join(' / ') : '未匹配';
-                                   const highlights = Array.from(new Set([
-                                     ...getMetadataHighlights(contract, 'customer_category_level1'),
-                                     ...getMetadataHighlights(contract, 'customer_category_level2'),
-                                     ...getMetadataHighlights(contract, 'contract_type'),
-                                   ]));
-                                   return highlightMetadataText(text, highlights);
-                                 })()}
-                               </Text>
-                             </div>
-                           )}
-                           {contract.metadata_info.contract_amount && (
-                             <div>
-                               <Text type="secondary">合同金额：</Text>
-                               <Text>
-                                 {highlightMetadataText(
-                                   String(contract.metadata_info.contract_amount), 
-                                   getMetadataHighlights(contract, 'contract_amount')
-                                 )}
-                               </Text>
-                             </div>
-                           )}
-                           {contract.metadata_info.project_description && (
-                             <div style={{ gridColumn: '1 / -1' }}>
-                               <Text type="secondary">项目描述：</Text>
-                               <Text>
-                                 {highlightMetadataText(
-                                   contract.metadata_info.project_description, 
-                                   getMetadataHighlights(contract, 'project_description')
-                                 )}
-                               </Text>
-                             </div>
-                           )}
-                         </div>
+                              </Text>
+                            </div>
+                          )}
+                          {(contract.metadata_info.customer_category_level1 || contract.metadata_info.customer_category_level2 || contract.metadata_info.contract_type) && (
+                            <div>
+                              <Text type="secondary">客户分类：</Text>
+                              <Text>
+                                {(() => {
+                                  const parts = [
+                                    contract.metadata_info.customer_category_level1 ?? contract.metadata_info.contract_type,
+                                    contract.metadata_info.customer_category_level2 || undefined,
+                                  ].filter((item): item is string => Boolean(item));
+                                  const text = parts.length > 0 ? parts.join(' / ') : '未匹配';
+                                  const highlights = Array.from(new Set([
+                                    ...getMetadataHighlights(contract, 'customer_category_level1'),
+                                    ...getMetadataHighlights(contract, 'customer_category_level2'),
+                                    ...getMetadataHighlights(contract, 'contract_type'),
+                                  ]));
+                                  return highlightMetadataText(text, highlights);
+                                })()}
+                              </Text>
+                            </div>
+                          )}
+                          {contract.metadata_info.contract_amount && (
+                            <div>
+                              <Text type="secondary">合同金额：</Text>
+                              <Text>
+                                {highlightMetadataText(
+                                  String(contract.metadata_info.contract_amount),
+                                  getMetadataHighlights(contract, 'contract_amount')
+                                )}
+                              </Text>
+                            </div>
+                          )}
+                          {contract.metadata_info.project_description && (
+                            <div style={{ gridColumn: '1 / -1' }}>
+                              <Text type="secondary">项目描述：</Text>
+                              <Text>
+                                {highlightMetadataText(
+                                  contract.metadata_info.project_description,
+                                  getMetadataHighlights(contract, 'project_description')
+                                )}
+                              </Text>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     )}
-                    <Collapse 
-                      ghost 
+                    <Collapse
+                      ghost
                       expandIcon={({ isActive }) => <CaretRightOutlined rotate={isActive ? 90 : 0} />}
                       defaultActiveKey={['0']}
                       items={[
@@ -980,7 +988,7 @@ const SearchPage: FC = () => {
           />
         </Card>
       )}
-      
+
       <MetadataEditModal
         visible={metadataModalVisible}
         onCancel={handleCloseMetadataModal}

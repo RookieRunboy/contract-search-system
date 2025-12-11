@@ -1,5 +1,5 @@
 import api from './api';
-import type { RegistrationRequestSummary, AuthUser } from '../types';
+import type { RegistrationRequestSummary, AuthUser, UserRole, UserRecord } from '../types';
 
 export interface LoginApiResponse {
   access_token: string;
@@ -46,4 +46,22 @@ export const rejectRegistration = async (requestId: string, reason?: string) => 
   return api.post(`/admin/registrations/${requestId}/reject`, {
     reason,
   });
+};
+
+export interface UsersResponse {
+  code: number;
+  message: string;
+  data: UserRecord[];
+}
+
+export const fetchAllUsers = async (): Promise<UsersResponse> => {
+  return api.get('/admin/users');
+};
+
+export const updateUserRole = async (userId: string, role: UserRole) => {
+  return api.put(`/admin/users/${userId}/role`, { role });
+};
+
+export const updateUserStatus = async (userId: string, status: 'active' | 'disabled') => {
+  return api.put(`/admin/users/${userId}/status`, { status });
 };

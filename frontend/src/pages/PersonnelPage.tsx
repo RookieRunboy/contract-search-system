@@ -19,9 +19,10 @@ import {
     UserOutlined,
     ReloadOutlined,
     ClockCircleOutlined,
+    DownloadOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
-import type { RegistrationRequestSummary, UserRecord, UserRole } from '../types';
+import type { RegistrationRequestSummary, UserRecord, UserRole, DownloadLogRecord } from '../types';
 import {
     fetchPendingRegistrations,
     approveRegistration as approveRegistrationRequest,
@@ -29,6 +30,7 @@ import {
     fetchAllUsers,
     updateUserRole,
     updateUserStatus,
+    fetchUserDownloadLogs,
 } from '../services/auth';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -254,6 +256,101 @@ const PersonnelPage: FC = () => {
         }
     };
 
+    // Handle download logs modal
+    const [downloadLogsModal, setDownloadLogsModal] = useState<{
+        open: boolean;
+        userId: string | null;
+        logs: DownloadLogRecord[];
+        loading: boolean;
+        page: number;
+        pageSize: number;
+        total: number;
+    }>({
+        open: false,
+        userId: null,
+        logs: [],
+        loading: false,
+        page: 1,
+        pageSize: 10,
+        total: 0,
+    });
+
+    const openDownloadLogsModal = async (userRecord: UserRecord) => {
+        setDownloadLogsModal({
+            open: true,
+            userId: userRecord.userId,
+            logs: [],
+            loading: true,
+            page: 1,
+            pageSize: 10,
+            total: 0,
+        });
+
+        try {
+            const response = await fetchUserDownloadLogs(userRecord.userId, 1, 10);
+            const responseData = response.data;
+            setDownloadLogsModal((prev) => ({
+                ...prev,
+                logs: responseData?.logs || [],
+                total: responseData?.total || 0,
+                loading: false,
+            }));
+        } catch (error) {
+            message.error(resolveApiError(error, '获取下载日志失败'));
+            setDownloadLogsModal((prev) => ({ ...prev, loading: false }));
+        }
+    };
+
+    const closeDownloadLogsModal = () => {
+        setDownloadLogsModal({
+            open: false,
+            userId: null,
+            logs: [],
+            loading: false,
+            page: 1,
+            pageSize: 10,
+            total: 0,
+        });
+    };
+
+    const handleDownloadLogsPageChange = async (page: number, pageSize: number) => {
+        if (!downloadLogsModal.userId) return;
+
+        setDownloadLogsModal((prev) => ({ ...prev, loading: true, page, pageSize }));
+
+        try {
+            const response = await fetchUserDownloadLogs(downloadLogsModal.userId, page, pageSize);
+            const responseData = response.data;
+            setDownloadLogsModal((prev) => ({
+                ...prev,
+                logs: responseData?.logs || [],
+                total: responseData?.total || 0,
+                loading: false,
+            }));
+        } catch (error) {
+            message.error(resolveApiError(error, '获取下载日志失败'));
+            setDownloadLogsModal((prev) => ({ ...prev, loading: false }));
+        }
+    };
+
+    // Download log columns
+    const downloadLogColumns: ColumnsType<DownloadLogRecord> = [
+        {
+            title: '下载时间',
+            dataIndex: 'download_time',
+            key: 'download_time',
+            width: '40%',
+            render: (value: string) => <Text type="secondary">{formatDateTime(value)}</Text>,
+        },
+        {
+            title: '合同名称',
+            dataIndex: 'document_name',
+            key: 'document_name',
+            width: '60%',
+            render: (text: string) => <Text>{text}</Text>,
+        },
+    ];
+
     // Format date
     const formatDateTime = (value?: string | null): string => {
         if (!value) {
@@ -372,7 +469,7 @@ const PersonnelPage: FC = () => {
         {
             title: '操作',
             key: 'actions',
-            width: '20%',
+            width: '25%',
             render: (_, record) => (
                 <Space size="small">
                     <Button
@@ -394,6 +491,14 @@ const PersonnelPage: FC = () => {
                             {record.status === 'active' ? '禁用' : '启用'}
                         </Button>
                     )}
+                    <Button
+                        type="link"
+                        size="small"
+                        icon={<DownloadOutlined />}
+                        onClick={() => openDownloadLogsModal(record)}
+                    >
+                        下载日志
+                    </Button>
                 </Space>
             ),
         },
@@ -516,6 +621,32 @@ const PersonnelPage: FC = () => {
                         ]}
                     />
                 </div>
+            </Modal>
+
+            {/* Download Logs Modal */}
+            <Modal
+                title={`下载日志 - ${downloadLogsModal.userId || ''}`}
+                open={downloadLogsModal.open}
+                onCancel={closeDownloadLogsModal}
+                footer={null}
+                width={600}
+            >
+                <Table
+                    columns={downloadLogColumns}
+                    dataSource={downloadLogsModal.logs}
+                    rowKey="log_id"
+                    loading={downloadLogsModal.loading}
+                    pagination={{
+                        current: downloadLogsModal.page,
+                        pageSize: downloadLogsModal.pageSize,
+                        total: downloadLogsModal.total,
+                        showSizeChanger: true,
+                        showTotal: (total) => `共 ${total} 条`,
+                        onChange: handleDownloadLogsPageChange,
+                    }}
+                    locale={{ emptyText: '暂无下载记录' }}
+                    size="small"
+                />
             </Modal>
         </div>
     );

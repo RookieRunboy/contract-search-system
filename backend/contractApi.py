@@ -25,6 +25,7 @@ from llm_metadata_extractor import MetadataExtractor
 from elasticsearch import exceptions as es_exceptions, helpers
 from upload_status_manager import UploadStatusManager
 from auth_manager import AuthManager
+from download_log_manager import DownloadLogManager
 
 # FastAPI应用
 app = FastAPI(title="contractsSearchAPI")
@@ -62,6 +63,7 @@ doc_getter = get_document_by_filename()
 metadata_extractor = MetadataExtractor()
 status_manager = UploadStatusManager()
 auth_manager = AuthManager()
+download_log_manager = DownloadLogManager()
 
 try:
     ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("AUTH_TOKEN_EXPIRE_MINUTES", "30"))
@@ -1518,6 +1520,10 @@ async def download_document(
         if not file_path.exists():
             raise HTTPException(status_code=404, detail="文件不存在")
         
+        # 记录下载日志
+        user_id = current_user.get("user_id", "unknown")
+        download_log_manager.record_download(user_id, document_name)
+        
         # 返回文件
         return FileResponse(
             path=str(file_path),
@@ -1529,6 +1535,26 @@ async def download_document(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"文件下载失败: {str(e)}")
 
+
+@app.get("/user/{user_id}/download-logs")
+async def get_user_download_logs(
+    user_id: str,
+    page: int = Query(default=1, ge=1, description="页码，从1开始"),
+    page_size: int = Query(default=10, ge=1, le=100, description="每页数量，最大100"),
+    current_user: Dict[str, Any] = Depends(require_superadmin),
+):
+    """
+    获取指定用户的下载日志（仅超级管理员可访问）
+    """
+    try:
+        result = download_log_manager.get_user_logs(user_id, page, page_size)
+        return {
+            "code": 200,
+            "message": "获取下载日志成功",
+            "data": result,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取下载日志失败: {str(e)}")
 
 # 前端静态文件服务（可选）
 # 如果前端dist文件存在，则提供静态文件服务

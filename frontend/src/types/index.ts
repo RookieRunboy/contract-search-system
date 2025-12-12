@@ -128,3 +128,17 @@ export interface RegistrationRequestSummary {
   decisionReason?: string | null;
 }
 
+export interface DownloadLogRecord {
+  log_id: string;
+  user_id: string;
+  document_name: string;
+  download_time: string;
+}
+
+export interface DownloadLogsResponse {
+  logs: DownloadLogRecord[];
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+}

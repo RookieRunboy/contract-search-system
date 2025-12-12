@@ -1,5 +1,5 @@
 import api from './api';
-import type { RegistrationRequestSummary, AuthUser, UserRole, UserRecord } from '../types';
+import type { RegistrationRequestSummary, AuthUser, UserRole, UserRecord, DownloadLogsResponse } from '../types';
 
 export interface LoginApiResponse {
   access_token: string;
@@ -64,4 +64,20 @@ export const updateUserRole = async (userId: string, role: UserRole) => {
 
 export const updateUserStatus = async (userId: string, status: 'active' | 'disabled') => {
   return api.put(`/admin/users/${userId}/status`, { status });
+};
+
+export interface UserDownloadLogsApiResponse {
+  code: number;
+  message: string;
+  data: DownloadLogsResponse;
+}
+
+export const fetchUserDownloadLogs = async (
+  userId: string,
+  page: number = 1,
+  pageSize: number = 10
+): Promise<UserDownloadLogsApiResponse> => {
+  return api.get(`/user/${userId}/download-logs`, {
+    params: { page, page_size: pageSize },
+  });
 };

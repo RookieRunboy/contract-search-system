@@ -106,11 +106,34 @@ const SearchPage: FC = () => {
   const highlightText = (text: string, query: string) => {
     if (!query) return text;
 
-    const regex = new RegExp(`(${query})`, 'gi');
+    // 字符级高亮逻辑：提取查询词中的所有有效字符（去重、去空格）
+    // 过滤掉空格、标点符号等无意义字符，避免满屏高亮
+    const validChars = new Set(
+      query.split('').filter(char => /[a-zA-Z0-9\u4e00-\u9fa5]/.test(char))
+    );
+
+    if (validChars.size === 0) return text;
+
+    // 构建正则：使用字符类 [chars]+ 匹配一个或多个连续的有效字符
+    const pattern = Array.from(validChars)
+      .map(char => char.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+      .join('');
+
+    const regex = new RegExp(`([${pattern}]+)`, 'gi');
     const parts = text.split(regex);
 
+    // 判断一个片段是否应该高亮：检查其所有字符是否都在有效字符集中
+    // 避免使用 regex.test()，因为带 g 标志的正则会有 lastIndex 陷阱
+    const shouldHighlight = (part: string): boolean => {
+      if (!part) return false;
+      for (const char of part) {
+        if (!validChars.has(char)) return false;
+      }
+      return true;
+    };
+
     return parts.map((part, index) =>
-      regex.test(part) ? (
+      shouldHighlight(part) ? (
         <span key={index} className="highlight">{part}</span>
       ) : (
         part

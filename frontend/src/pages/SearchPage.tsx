@@ -60,8 +60,13 @@ const SearchPage: FC = () => {
 
 
   const handleSearch = async () => {
-    if (!searchQuery.trim()) {
+    const trimmedQuery = searchQuery.trim();
+    if (!trimmedQuery) {
       message.warning('请输入搜索关键词');
+      return;
+    }
+    if (trimmedQuery.length < 2) {
+      message.warning('搜索关键词至少需要2个字符');
       return;
     }
 
@@ -124,8 +129,9 @@ const SearchPage: FC = () => {
 
     // 判断一个片段是否应该高亮：检查其所有字符是否都在有效字符集中
     // 避免使用 regex.test()，因为带 g 标志的正则会有 lastIndex 陷阱
+    // 注意：单个字符不高亮，减少视觉噪音（至少需要连续2个字符才高亮）
     const shouldHighlight = (part: string): boolean => {
-      if (!part) return false;
+      if (!part || part.length < 2) return false; // 单个字符不高亮
       for (const char of part) {
         if (!validChars.has(char)) return false;
       }

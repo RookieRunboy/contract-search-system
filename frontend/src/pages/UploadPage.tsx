@@ -33,9 +33,9 @@ import {
   SyncOutlined,
   CloudUploadOutlined,
 } from '@ant-design/icons';
-import { API_BASE_URL, deleteDocument, getUploadedDocuments, getDocumentDetail, downloadDocument } from '../services/api';
+import { API_BASE_URL, deleteDocument, getUploadedDocuments, getDocumentDetail, downloadDocument, getUploadQueueStatus } from '../services/api';
 import MetadataEditModal from '../components/MetadataEditModal';
-import type { ContractMetadata } from '../types';
+import type { ContractMetadata, UploadQueueStatus } from '../types';
 import type { ColumnsType } from 'antd/es/table';
 import type { UploadChangeParam } from 'antd/es/upload';
 import type { UploadFile } from 'antd/es/upload/interface';
@@ -63,6 +63,8 @@ interface DocumentRecord {
   processedPages?: number;
   totalPages?: number;
   uploadId?: string;
+  contractCode?: string;
+  cirCode?: string;
 }
 
 type UploadDocumentRaw = Record<string, unknown>;
@@ -295,6 +297,9 @@ const UploadPage: FC = () => {
   const [deleteLoadingKey, setDeleteLoadingKey] = useState<string | null>(null);
   const [downloadingKey, setDownloadingKey] = useState<string | null>(null);
 
+  // 队列状态
+  const [queueStatus, setQueueStatus] = useState<UploadQueueStatus | null>(null);
+
   // 获取文档列表
   const fetchDocuments = useCallback(async (silent = false) => {
     setLoading(true);
@@ -348,6 +353,8 @@ const UploadPage: FC = () => {
             || '解析成功';
 
           const actionsValue = doc['actions'];
+          const contractCode = pickString(doc, ['contract_code', 'contractCode']);
+          const cirCode = pickString(doc, ['cir_code', 'cirCode']);
 
           return {
             contractKey,
@@ -366,11 +373,21 @@ const UploadPage: FC = () => {
             processedPages: processedPages !== undefined ? processedPages : undefined,
             totalPages: totalPages !== undefined ? totalPages : undefined,
             uploadId,
+            contractCode,
+            cirCode,
           };
         })
         .filter(Boolean) as DocumentRecord[];
 
       setDocuments(normalized);
+
+      // 并行获取队列状态
+      try {
+        const status = await getUploadQueueStatus();
+        setQueueStatus(status);
+      } catch {
+        // 队列状态获取失败不影响主流程
+      }
     } catch (error) {
       console.error('获取文档列表失败:', error);
       if (!silent) {
@@ -615,47 +632,67 @@ const UploadPage: FC = () => {
       title: '合同名称',
       dataIndex: 'name',
       key: 'name',
-      width: '35%',
+      width: '22%',
       render: (text: string) => (
         <Space>
           <FileTextOutlined />
-          <Text strong>{text}</Text>
+          <Tooltip title={text}>
+            <Text strong ellipsis style={{ maxWidth: 200 }}>{text}</Text>
+          </Tooltip>
         </Space>
+      ),
+    },
+    {
+      title: '合同编码',
+      dataIndex: 'contractCode',
+      key: 'contractCode',
+      width: '10%',
+      render: (code: string | undefined) => (
+        code ? <Text copyable={{ text: code }}>{code}</Text> : <Text type="secondary">-</Text>
+      ),
+    },
+    {
+      title: 'CIR编码',
+      dataIndex: 'cirCode',
+      key: 'cirCode',
+      width: '12%',
+      render: (code: string | undefined) => (
+        code ? <Text copyable={{ text: code }}>{code}</Text> : <Text type="secondary">-</Text>
       ),
     },
     {
       title: '上传时间',
       dataIndex: 'uploadTime',
       key: 'uploadTime',
-      width: '15%',
+      width: '12%',
       render: (text: string) => <Text type="secondary">{text}</Text>,
     },
     {
       title: '解析状态',
       dataIndex: 'status',
       key: 'status',
-      width: '18%',
+      width: '12%',
       render: (_: string, record) => renderStatus(record),
     },
     {
-      title: '元数据提取状态',
+      title: '元数据状态',
       dataIndex: 'metadataStatus',
       key: 'metadataStatus',
-      width: '14%',
+      width: '10%',
       render: (_: string | undefined, record) => renderMetadataStatus(record),
     },
     {
       title: '页数',
       dataIndex: 'pageCount',
       key: 'pageCount',
-      width: '8%',
+      width: '6%',
       render: (count: number) => <Badge count={count} color="blue" />,
     },
     {
       title: '文件大小',
       dataIndex: 'fileSize',
       key: 'fileSize',
-      width: '10%',
+      width: '8%',
       render: (size: string) => <Text type="secondary">{size}</Text>,
     },
     {
@@ -856,7 +893,73 @@ const UploadPage: FC = () => {
           </p>
         </Dragger>
         {uploading && <Progress percent={50} status="active" />}
+
+        {/* 上传后显示排队提示 */}
+        {documents.some(d => d.parseStatus === 'pending' || d.parseStatus === 'processing') && (
+          <div style={{ marginTop: 12, padding: '8px 12px', background: '#e6f7ff', borderRadius: 6, border: '1px solid #91d5ff' }}>
+            <Text type="secondary">
+              <SyncOutlined spin style={{ marginRight: 8 }} />
+              您的文件已加入处理队列，将按顺序处理
+            </Text>
+          </div>
+        )}
       </Card>
+
+      {/* 队列状态展示 */}
+      {queueStatus && (queueStatus.pending_count > 0 || queueStatus.processing_count > 0 || queueStatus.memory_is_low) && (
+        <Card style={{ marginBottom: '24px' }} size="small">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
+            <Space size="large">
+              <Tooltip title="等待处理的任务">
+                <span>
+                  <ClockCircleOutlined style={{ marginRight: 4 }} />
+                  待处理: <Text strong>{queueStatus.pending_count}</Text>
+                </span>
+              </Tooltip>
+              <Tooltip title="正在处理的任务">
+                <span>
+                  <SyncOutlined spin={queueStatus.processing_count > 0} style={{ marginRight: 4 }} />
+                  处理中: <Text strong>{queueStatus.processing_count}</Text> / {queueStatus.max_concurrent}
+                </span>
+              </Tooltip>
+              <Tooltip title="今日已完成">
+                <span>
+                  <CheckCircleOutlined style={{ marginRight: 4, color: '#52c41a' }} />
+                  今日完成: <Text type="success">{queueStatus.completed_today}</Text>
+                </span>
+              </Tooltip>
+              {queueStatus.failed_today > 0 && (
+                <Tooltip title="今日失败">
+                  <span>
+                    <ExclamationCircleOutlined style={{ marginRight: 4, color: '#ff4d4f' }} />
+                    失败: <Text type="danger">{queueStatus.failed_today}</Text>
+                  </span>
+                </Tooltip>
+              )}
+            </Space>
+
+            <Space>
+              <Tooltip title={`总内存: ${queueStatus.memory_total_mb}MB, 可用: ${queueStatus.memory_available_mb}MB`}>
+                <span>
+                  内存:
+                  <Progress
+                    percent={queueStatus.memory_percent_used}
+                    size="small"
+                    style={{ width: 100, marginLeft: 8 }}
+                    status={queueStatus.memory_is_low ? 'exception' : 'normal'}
+                    format={(pct) => `${pct}%`}
+                  />
+                </span>
+              </Tooltip>
+              {queueStatus.memory_is_low && (
+                <Tag color="error" icon={<ExclamationCircleOutlined />}>
+                  内存不足
+                </Tag>
+              )}
+            </Space>
+          </div>
+        </Card>
+      )}
 
       {/* 文档列表 */}
       <Card>

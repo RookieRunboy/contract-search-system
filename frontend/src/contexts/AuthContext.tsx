@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, useRef } from 'react';
 import { message, Modal } from 'antd';
 import type { ReactNode } from 'react';
 import type { AuthUser } from '../types';
@@ -36,6 +36,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [token, setToken] = useState<string | null>(null);
   const [initializing, setInitializing] = useState(true);
   const [authenticating, setAuthenticating] = useState(false);
+  const expirationModalShown = useRef(false);
 
   useEffect(() => {
     const storedToken = localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
@@ -89,6 +90,29 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setUser(null);
     setToken(null);
   }, []);
+
+  // Listen for session expiration events
+  useEffect(() => {
+    const handleSessionExpired = () => {
+      if (expirationModalShown.current) return;
+      expirationModalShown.current = true;
+
+      Modal.warning({
+        title: '登录过期',
+        content: '您的登录凭证已过期，请重新登录。',
+        okText: '重新登录',
+        onOk: () => {
+          expirationModalShown.current = false;
+          logout();
+        },
+      });
+    };
+
+    window.addEventListener('auth:session-expired', handleSessionExpired);
+    return () => {
+      window.removeEventListener('auth:session-expired', handleSessionExpired);
+    };
+  }, [logout]);
 
   const value = useMemo<AuthContextValue>(() => ({
     user,

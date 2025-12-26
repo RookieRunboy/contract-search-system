@@ -286,6 +286,15 @@ class MultiModalTextExtractor:
                             "text": f"解析失败: {exc}",
                         }
                     )
+            finally:
+                # 释放 PIL Image 对象，防止内存泄漏
+                try:
+                    image.close()
+                except Exception:
+                    pass
+
+        # 清理 images 列表引用，帮助 GC 回收内存
+        images.clear()
 
         duration = time.time() - start
         success_pages = sum(1 for item in results if not str(item.get("text", "")).startswith("ERROR"))

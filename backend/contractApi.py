@@ -1,9 +1,13 @@
 import asyncio
+import gc
 from datetime import datetime, timezone, timedelta
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Union
+
+import psutil
 
 from fastapi import Body, Depends, FastAPI, File, UploadFile, HTTPException, Query
 from fastapi.concurrency import run_in_threadpool
@@ -66,9 +70,9 @@ auth_manager = AuthManager()
 download_log_manager = DownloadLogManager()
 
 try:
-    ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("AUTH_TOKEN_EXPIRE_MINUTES", "30"))
+    ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("AUTH_TOKEN_EXPIRE_MINUTES", "4320"))
 except ValueError:
-    ACCESS_TOKEN_EXPIRE_MINUTES = 30
+    ACCESS_TOKEN_EXPIRE_MINUTES = 4320
 
 AUTH_SECRET_KEY = os.getenv("AUTH_SECRET_KEY")
 if not AUTH_SECRET_KEY:
@@ -79,6 +83,91 @@ AUTH_ALGORITHM = "HS256"
 auth_scheme = HTTPBearer(auto_error=False)
 
 ACTIVE_UPLOAD_TASKS: Set[asyncio.Task[Any]] = set()
+
+# ========== Upload Queue Configuration ==========
+# 读取并发配置（默认 4，范围 1-10）
+try:
+    _raw_max_concurrent = int(os.getenv("UPLOAD_MAX_CONCURRENT", "4"))
+    if 1 <= _raw_max_concurrent <= 10:
+        UPLOAD_MAX_CONCURRENT = _raw_max_concurrent
+    else:
+        logger.warning(
+            f"UPLOAD_MAX_CONCURRENT={_raw_max_concurrent} 超出范围 [1, 10]，使用默认值 4"
+        )
+        UPLOAD_MAX_CONCURRENT = 4
+except ValueError:
+    logger.warning("UPLOAD_MAX_CONCURRENT 无效，使用默认值 4")
+    UPLOAD_MAX_CONCURRENT = 4
+
+# 读取内存阈值配置（默认 512MB）
+try:
+    _raw_min_memory = int(os.getenv("UPLOAD_MIN_MEMORY_MB", "512"))
+    UPLOAD_MIN_MEMORY_MB = _raw_min_memory if _raw_min_memory > 0 else 512
+except ValueError:
+    logger.warning("UPLOAD_MIN_MEMORY_MB 无效，使用默认值 512")
+    UPLOAD_MIN_MEMORY_MB = 512
+
+# 并发处理信号量
+PROCESSING_SEMAPHORE = asyncio.Semaphore(UPLOAD_MAX_CONCURRENT)
+
+logger.info(f"Upload Queue Config: max_concurrent={UPLOAD_MAX_CONCURRENT}, min_memory_mb={UPLOAD_MIN_MEMORY_MB}")
+
+
+def get_memory_status() -> Dict[str, Any]:
+    """获取系统内存状态信息。"""
+    mem = psutil.virtual_memory()
+    total_mb = mem.total // (1024 * 1024)
+    available_mb = mem.available // (1024 * 1024)
+    percent_used = mem.percent
+    is_low = available_mb < UPLOAD_MIN_MEMORY_MB
+    return {
+        "memory_total_mb": total_mb,
+        "memory_available_mb": available_mb,
+        "memory_percent_used": round(percent_used, 1),
+        "memory_is_low": is_low,
+    }
+
+
+# ========== 定期垃圾回收任务 ==========
+_gc_task: Optional[asyncio.Task[None]] = None
+
+
+async def _periodic_gc_task() -> None:
+    """定期执行垃圾回收，清理长时间未使用的缓存对象。"""
+    gc_interval = 300  # 每 5 分钟执行一次
+    while True:
+        await asyncio.sleep(gc_interval)
+        try:
+            collected = gc.collect()
+            mem_status = get_memory_status()
+            logger.debug(
+                f"定期 GC 完成: 回收 {collected} 个对象, "
+                f"当前可用内存 {mem_status['memory_available_mb']}MB"
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"定期 GC 失败: {exc}")
+
+
+@app.on_event("startup")
+async def _start_periodic_gc() -> None:
+    """启动定期垃圾回收后台任务。"""
+    global _gc_task
+    _gc_task = asyncio.create_task(_periodic_gc_task())
+    logger.info("定期垃圾回收任务已启动 (间隔 5 分钟)")
+
+
+@app.on_event("shutdown")
+async def _stop_periodic_gc() -> None:
+    """停止定期垃圾回收后台任务。"""
+    global _gc_task
+    if _gc_task:
+        _gc_task.cancel()
+        try:
+            await _gc_task
+        except asyncio.CancelledError:
+            pass
+        _gc_task = None
+        logger.info("定期垃圾回收任务已停止")
 
 
 class LoginRequest(BaseModel):
@@ -372,6 +461,9 @@ def _compose_document_entry(
     file_size_bytes = file_info.get('file_size_bytes') or file_size_bytes
     upload_time = file_info.get('upload_time') or upload_time
 
+    # 从文件名提取合同编码和CIR编码
+    codes = _extract_codes_from_filename(file_name)
+
     output = {
         "contract_name": contract_name,
         "file_name": file_name,
@@ -385,12 +477,16 @@ def _compose_document_entry(
         "file_size_bytes": file_size_bytes,
         "upload_id": upload_id,
         "created_at": created_at,
+        "contract_code": codes.get("contract_code"),
+        "cir_code": codes.get("cir_code"),
     }
 
     return output
 
 
 async def _process_uploaded_file(upload_id: str, file_path: Path) -> None:
+    """处理上传的 PDF 文件，包含并发控制和内存保护。"""
+
     def _status_callback(stage: str, payload: Optional[Dict[str, Any]]) -> None:
         data = payload or {}
         filtered = {key: value for key, value in data.items() if value is not None}
@@ -399,18 +495,60 @@ async def _process_uploaded_file(upload_id: str, file_path: Path) -> None:
         except Exception as exc:  # noqa: BLE001
             print(f"WARNING: 更新上传状态失败 upload_id={upload_id}, stage={stage}: {exc}")
 
-    try:
-        await run_in_threadpool(
-            pdf_to_es.process_file_path,
-            file_path,
-            status_callback=_status_callback,
-        )
-    except Exception as exc:  # noqa: BLE001
-        print(f"ERROR: 处理上传文件失败 upload_id={upload_id}, file={file_path.name}: {exc}")
+    async def _wait_for_memory() -> bool:
+        """等待内存恢复，返回 True 表示可以继续，False 表示超时。"""
+        max_wait_seconds = 300  # 最多等待 5 分钟
+        check_interval = 5  # 每 5 秒检查一次
+        waited = 0
+
+        while waited < max_wait_seconds:
+            mem_status = get_memory_status()
+            if not mem_status["memory_is_low"]:
+                if waited > 0:
+                    logger.info(
+                        f"内存恢复正常 (available={mem_status['memory_available_mb']}MB)，继续处理 upload_id={upload_id}"
+                    )
+                return True
+
+            logger.warning(
+                f"内存不足 (available={mem_status['memory_available_mb']}MB < {UPLOAD_MIN_MEMORY_MB}MB)，"
+                f"等待中... upload_id={upload_id}, 已等待 {waited}s"
+            )
+            await asyncio.sleep(check_interval)
+            waited += check_interval
+
+        logger.error(f"等待内存超时（{max_wait_seconds}s），标记任务失败 upload_id={upload_id}")
+        return False
+
+    # 使用信号量控制并发
+    async with PROCESSING_SEMAPHORE:
+        # 内存保护：检查可用内存
+        memory_ok = await _wait_for_memory()
+        if not memory_ok:
+            try:
+                status_manager.update_upload_record(
+                    upload_id, status="failed", error="内存不足，等待超时"
+                )
+            except Exception as update_exc:  # noqa: BLE001
+                print(f"WARNING: 记录失败状态出错 upload_id={upload_id}: {update_exc}")
+            return
+
         try:
-            status_manager.update_upload_record(upload_id, status="failed", error=str(exc))
-        except Exception as update_exc:  # noqa: BLE001
-            print(f"WARNING: 记录失败状态出错 upload_id={upload_id}: {update_exc}")
+            await run_in_threadpool(
+                pdf_to_es.process_file_path,
+                file_path,
+                status_callback=_status_callback,
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f"ERROR: 处理上传文件失败 upload_id={upload_id}, file={file_path.name}: {exc}")
+            try:
+                status_manager.update_upload_record(upload_id, status="failed", error=str(exc))
+            except Exception as update_exc:  # noqa: BLE001
+                print(f"WARNING: 记录失败状态出错 upload_id={upload_id}: {update_exc}")
+        finally:
+            # 强制垃圾回收，释放内存
+            gc.collect()
+            logger.debug(f"已完成垃圾回收 upload_id={upload_id}")
 
 
 @app.get("/document/list")
@@ -490,6 +628,91 @@ def _format_file_size(size_in_bytes: int) -> str:
         return f"{size_in_mb:.1f} MB"
     size_in_gb = size_in_mb / 1024
     return f"{size_in_gb:.2f} GB"
+
+
+def _extract_codes_from_filename(filename: str) -> Dict[str, Optional[str]]:
+    """
+    从文件名中提取合同编码和CIR编码。
+    
+    支持的命名模式：
+    1. [合同编码]-[CIR编码]合同名.pdf (方括号格式)
+    2. [合同编码]合同名.pdf
+    3. [CIR编码]合同名.pdf
+    4. 合同编码-CIR编码-合同名.pdf (无方括号格式)
+    5. 合同名.pdf (无编码)
+    
+    CIR编码格式: 以 "CIR" (不区分大小写) 开头，后接数字
+    合同编码格式: 以字母开头，后接数字
+    
+    Returns:
+        Dict with 'contract_code' and 'cir_code' keys, values may be None
+    """
+    result: Dict[str, Optional[str]] = {
+        "contract_code": None,
+        "cir_code": None,
+    }
+    
+    if not filename:
+        return result
+    
+    # 移除文件扩展名
+    base_name = Path(filename).stem
+    
+    # CIR 编码正则: 以 CIR 开头（不区分大小写），后接数字
+    cir_pattern = re.compile(r'^cir\d+$', re.IGNORECASE)
+    # 合同编码正则: 以字母开头，后接数字
+    contract_code_pattern = re.compile(r'^[A-Za-z]\d+$')
+    
+    def classify_code(code: str) -> str:
+        """
+        判断编码类型: 'cir', 'contract', 或 'unknown'
+        """
+        code_stripped = code.strip()
+        if cir_pattern.match(code_stripped):
+            return 'cir'
+        if contract_code_pattern.match(code_stripped):
+            return 'contract'
+        return 'unknown'
+    
+    def assign_code(code: str) -> None:
+        """根据编码类型分配到结果中"""
+        code_type = classify_code(code)
+        if code_type == 'cir':
+            result["cir_code"] = code
+        elif code_type == 'contract':
+            result["contract_code"] = code
+    
+    # 模式A: 方括号格式 [Code1]-[Code2]Name
+    pattern_two_brackets = r'^\[([^\]]+)\]-\[([^\]]+)\]'
+    match_two_brackets = re.match(pattern_two_brackets, base_name)
+    if match_two_brackets:
+        assign_code(match_two_brackets.group(1).strip())
+        assign_code(match_two_brackets.group(2).strip())
+        return result
+    
+    # 模式B: 方括号格式 [Code]Name
+    pattern_one_bracket = r'^\[([^\]]+)\]'
+    match_one_bracket = re.match(pattern_one_bracket, base_name)
+    if match_one_bracket:
+        assign_code(match_one_bracket.group(1).strip())
+        return result
+    
+    # 模式C: 无方括号格式 - 用连字符分隔，如 C500000241118010-CIR500000241118020-合同名
+    # 按连字符分割，检查前几个部分是否为编码
+    parts = base_name.split('-')
+    if len(parts) >= 2:
+        # 检查前两个部分
+        for part in parts[:2]:
+            part_stripped = part.strip()
+            if part_stripped:
+                assign_code(part_stripped)
+        
+        # 如果找到了任何编码，直接返回
+        if result["contract_code"] is not None or result["cir_code"] is not None:
+            return result
+    
+    # 模式D: 无编码
+    return result
 
 
 @app.post("/auth/login")
@@ -1555,6 +1778,53 @@ async def get_user_download_logs(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取下载日志失败: {str(e)}")
+
+
+@app.get("/upload/queue-status")
+async def get_upload_queue_status(
+    current_user: Dict[str, Any] = Depends(require_admin),
+):
+    """
+    获取上传队列状态信息（仅管理员可访问）
+
+    返回：
+    - pending_count: 待处理任务数量
+    - processing_count: 正在处理任务数量
+    - completed_today: 当日完成数量
+    - failed_today: 当日失败数量
+    - max_concurrent: 最大并发配置值
+    - memory_*: 内存使用信息
+    """
+    try:
+        # 获取各状态计数
+        status_counts = status_manager.count_by_status()
+
+        # 计算 pending 和 processing 数量
+        pending_count = status_counts.get("pending", 0)
+        processing_count = (
+            status_counts.get("parsing", 0)
+            + status_counts.get("vectorizing", 0)
+            + status_counts.get("metadata_extracting", 0)
+        )
+
+        # 获取内存信息
+        memory_status = get_memory_status()
+
+        return {
+            "code": 200,
+            "message": "获取队列状态成功",
+            "data": {
+                "pending_count": pending_count,
+                "processing_count": processing_count,
+                "completed_today": status_counts.get("completed_today", 0),
+                "failed_today": status_counts.get("failed_today", 0),
+                "max_concurrent": UPLOAD_MAX_CONCURRENT,
+                **memory_status,
+            },
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取队列状态失败: {str(e)}")
+
 
 # 前端静态文件服务（可选）
 # 如果前端dist文件存在，则提供静态文件服务

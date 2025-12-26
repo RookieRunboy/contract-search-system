@@ -214,3 +214,87 @@ class UploadStatusManager:
         except Exception as exc:  # noqa: BLE001
             print(f"WARNING: 删除上传状态记录失败 {normalized}: {exc}")
             return 0
+
+    def count_by_status(self) -> Dict[str, int]:
+        """统计各状态的任务数量，并返回当日完成/失败计数。"""
+        try:
+            # 获取今天零点的时间戳（UTC）
+            today_start = datetime.now(timezone.utc).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            ).isoformat()
+
+            agg_query = {
+                "size": 0,
+                "aggs": {
+                    "status_counts": {
+                        "terms": {"field": "status", "size": 20}
+                    },
+                    "completed_today": {
+                        "filter": {
+                            "bool": {
+                                "must": [
+                                    {"term": {"status": "completed"}},
+                                    {"range": {"updated_at": {"gte": today_start}}}
+                                ]
+                            }
+                        }
+                    },
+                    "failed_today": {
+                        "filter": {
+                            "bool": {
+                                "must": [
+                                    {"term": {"status": "failed"}},
+                                    {"range": {"updated_at": {"gte": today_start}}}
+                                ]
+                            }
+                        }
+                    }
+                }
+            }
+
+            response = self.es.search(index=self.index_name, body=agg_query)
+            aggs = response.get("aggregations", {})
+
+            # 解析状态计数
+            status_buckets = aggs.get("status_counts", {}).get("buckets", [])
+            counts: Dict[str, int] = {}
+            for bucket in status_buckets:
+                counts[bucket["key"]] = bucket["doc_count"]
+
+            # 添加当日统计
+            counts["completed_today"] = aggs.get("completed_today", {}).get("doc_count", 0)
+            counts["failed_today"] = aggs.get("failed_today", {}).get("doc_count", 0)
+
+            return counts
+        except Exception as exc:  # noqa: BLE001
+            print(f"WARNING: 统计状态数量失败: {exc}")
+            return {}
+
+    def list_pending_uploads(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """获取待处理任务列表（按创建时间排序，FIFO）。"""
+        processing_statuses = ["pending", "parsing", "vectorizing", "metadata_extracting"]
+
+        try:
+            query = {
+                "size": limit,
+                "query": {
+                    "terms": {"status": processing_statuses}
+                },
+                "sort": [
+                    {"created_at": {"order": "asc"}}  # FIFO: 最早创建的先处理
+                ]
+            }
+
+            response = self.es.search(index=self.index_name, body=query)
+            hits = response.get("hits", {}).get("hits", [])
+
+            results: List[Dict[str, Any]] = []
+            for hit in hits:
+                source = hit.get("_source", {}) or {}
+                source["upload_id"] = hit.get("_id")
+                results.append(source)
+
+            return results
+        except Exception as exc:  # noqa: BLE001
+            print(f"WARNING: 获取待处理列表失败: {exc}")
+            return []

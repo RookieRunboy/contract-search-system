@@ -142,3 +142,16 @@ export interface DownloadLogsResponse {
   page_size: number;
   total_pages: number;
 }
+
+// 上传队列状态
+export interface UploadQueueStatus {
+  pending_count: number;
+  processing_count: number;
+  completed_today: number;
+  failed_today: number;
+  max_concurrent: number;
+  memory_total_mb: number;
+  memory_available_mb: number;
+  memory_percent_used: number;
+  memory_is_low: boolean;
+}

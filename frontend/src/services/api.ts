@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { ContractSearchResult, DocumentChunk, MetadataExtractionResponse, ContractMetadata } from '../types/index';
+import type { ContractSearchResult, DocumentChunk, MetadataExtractionResponse, ContractMetadata, UploadQueueStatus } from '../types/index';
 
 export const API_BASE_URL = import.meta.env.DEV ? '/api' : '';
 export const AUTH_TOKEN_STORAGE_KEY = 'contract_search_access_token';
@@ -32,6 +32,13 @@ api.interceptors.response.use(
     return response.data;
   },
   (error) => {
+    // Check for 401 Unauthorized (excluding login endpoint)
+    if (error.response?.status === 401) {
+      const isLoginRequest = error.config?.url?.includes('/auth/login');
+      if (!isLoginRequest) {
+        window.dispatchEvent(new Event('auth:session-expired'));
+      }
+    }
     // 统一向上抛出，由调用处/页面统一处理，避免重复打印日志
     return Promise.reject(error);
   }
@@ -415,6 +422,20 @@ export const getCustomerCategories = async (): Promise<Record<string, string[]>>
   } catch (error: any) {
     console.error('Failed to load customer categories:', error);
     return {};
+  }
+};
+
+// 获取上传队列状态
+export const getUploadQueueStatus = async (): Promise<UploadQueueStatus | null> => {
+  try {
+    const response: any = await api.get('/upload/queue-status');
+    if (response?.data && typeof response.data === 'object') {
+      return response.data as UploadQueueStatus;
+    }
+    return null;
+  } catch (error: any) {
+    console.error('Failed to get upload queue status:', error);
+    return null;
   }
 };
 

@@ -22,3 +22,6 @@ pdf2image==1.17.0
 Pillow==10.2.0
 numpy==1.26.4
 openpyxl==3.1.2
+
+# System monitoring (upload queue memory management)
+psutil>=5.9.0

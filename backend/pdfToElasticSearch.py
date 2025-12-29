@@ -29,20 +29,21 @@ class PDFTextExtractor:
         """
         self.extractor: Optional[MultiModalTextExtractor] = None
 
-    def extract_text(self, pdf_bytes, pdf_name=None):
+    def extract_text(self, pdf_bytes, pdf_name=None, status_callback: Optional[Callable[[str, Dict[str, Any]], None]] = None):
         """
         从PDF字节中提取文本信息
 
         参数:
         pdf_bytes (bytes): PDF文件的字节内容
         pdf_name (str, optional): PDF文件名，如果未提供则使用默认名称
+        status_callback (callable, optional): 状态回调函数
 
         返回:
         list: 包含每页文本信息的JSON格式列表
         """
         if self.extractor is None:
             self.extractor = MultiModalTextExtractor()
-        return self.extractor.extract_pdf_bytes(pdf_bytes, pdf_name)
+        return self.extractor.extract_pdf_bytes(pdf_bytes, pdf_name, status_callback=status_callback)
 
 class JSONToElasticsearch:
     def __init__(self, es_host: str ="http://localhost:9200", model_name: str ="bge-m3", index_name: str ="contracts_unified"):
@@ -91,7 +92,7 @@ class JSONToElasticsearch:
                 return True
         return False
 
-    def load_to_elasticsearch(self, pdf_name: str, pageId: int, text: str, total_pages: int = None, file_size: int = None) -> bool:
+    def load_to_elasticsearch(self, pdf_name: str, pageId: int, text: str, total_pages: int = None, file_size: int = None, file_hash: str = None) -> bool:
         try:
             if not self.es:
                 raise RuntimeError("Elasticsearch未初始化")
@@ -135,7 +136,8 @@ class JSONToElasticsearch:
                         "project_description": None,
                         "positions": None,
                         "personnel_list": None,
-                        "extracted_at": None
+                        "extracted_at": None,
+                        "file_hash": file_hash,  # 存储文件哈希
                     },
                     "total_pages": total_pages,
                     "file_size": file_size
@@ -237,6 +239,7 @@ class JSONToElasticsearch:
         contractJson: List[Dict[str, Any]],
         file_size: int = None,
         status_callback: StatusCallback = None,
+        file_hash: str = None,
     ) -> Dict[str, Any]:
         contract_name = None
         total_pages = len(contractJson)
@@ -253,25 +256,33 @@ class JSONToElasticsearch:
                     payload["message"] = vector_message
                 status_callback("vectorizing", payload)
 
-            for index, page in enumerate(contractJson, start=1):
-                contract_name = page['pdf_name']
-                self.load_to_elasticsearch(
-                    pdf_name=page['pdf_name'],
-                    pageId=page['pageId'],
-                    text=page['text'],
-                    total_pages=total_pages,
-                    file_size=file_size,
-                )
+            current_stage = "vectorizing"
+            try:
+                for index, page in enumerate(contractJson, start=1):
+                    contract_name = page['pdf_name']
+                    self.load_to_elasticsearch(
+                        pdf_name=page['pdf_name'],
+                        pageId=page['pageId'],
+                        text=page['text'],
+                        total_pages=total_pages,
+                        file_size=file_size,
+                        file_hash=file_hash if page['pageId'] == 1 else None,  # 只在第一页存储哈希
+                    )
 
+                    if status_callback:
+                        payload = {
+                            "total_pages": total_pages,
+                            "processed_pages": index,
+                        }
+                        if vector_message and index == 1:
+                            payload["message"] = vector_message
+                        status_callback(current_stage, payload)
+            except Exception as e:
                 if status_callback:
-                    payload = {
-                        "total_pages": total_pages,
-                        "processed_pages": index,
-                    }
-                    if vector_message and index == 1:
-                        payload["message"] = vector_message
-                    status_callback("vectorizing", payload)
+                    status_callback("failed_vector", {"error": f"向量化/索引失败: {str(e)}"})
+                raise
 
+            current_stage = "metadata_extracting"
             metadata_status = "skipped"
             has_metadata = False
             metadata_error = None
@@ -281,7 +292,7 @@ class JSONToElasticsearch:
                 print(f"开始提取合同 {contract_name} 的元数据...")
 
                 if status_callback:
-                    status_callback("metadata_extracting", {"total_pages": total_pages})
+                    status_callback(current_stage, {"total_pages": total_pages})
 
                 metadata_result = self.extract_and_update_metadata(contract_name, full_text)
 
@@ -317,13 +328,26 @@ class JSONToElasticsearch:
                 }
                 if vector_message:
                     payload["message"] = vector_message
-                status_callback("completed", payload)
+                
+                # 如果元数据提取失败，标记为 failed_metadata，否则为 completed
+                if metadata_status == "failed":
+                    status_callback("failed_metadata", payload)
+                else:
+                    status_callback("completed", payload)
 
             return result
         except Exception as e:  # noqa: BLE001
+            # 如果是已经处理过的特定阶段错误，且已经调用了回调，这里可能不需要再次调用通用failed
+            # 但为了安全起见，如果在主try块中捕获到其他未处理异常
             if status_callback:
-                status_callback("failed", {"error": str(e)})
-            print(f"批量索引失败: {str(e)}")
+                 # 根据当前阶段推断错误类型
+                error_stage = "failed"
+                if current_stage == "vectorizing":
+                    error_stage = "failed_vector"
+                elif current_stage == "metadata_extracting":
+                    error_stage = "failed_metadata"
+                status_callback(error_stage, {"error": str(e)})
+            print(f"批量索引失败 ({current_stage}): {str(e)}")
             raise
 
 class PdfToElasticsearch:
@@ -336,20 +360,25 @@ class PdfToElasticsearch:
         filename: str,
         *,
         status_callback: StatusCallback = None,
+        file_hash: str = None,
     ) -> Dict[str, Any]:
         contract_name = Path(filename).stem
 
-        if status_callback:
-            status_callback("parsing", {})
-
-        contract_json = self.pdfExtractor.extract_text(contents, contract_name)
+        # "parsing" 状态已废弃，由内部更细粒度状态替代
+        
+        try:
+            contract_json = self.pdfExtractor.extract_text(contents, contract_name, status_callback=status_callback)
+        except Exception as e:
+            if status_callback:
+                 status_callback("failed_images", {"error": f"PDF处理/图片转换失败: {str(e)}"})
+            raise
 
         if not isinstance(contract_json, list) or not contract_json:
             if status_callback:
                 status_callback(
-                    "failed",
+                    "failed_ocr",
                     {
-                        "error": "未识别到任何页面内容",
+                        "error": "OCR未识别到任何页面内容",
                     },
                 )
             raise RuntimeError("PDF 解析失败：未返回任何页面内容")
@@ -379,28 +408,24 @@ class PdfToElasticsearch:
 
             if status_callback:
                 status_callback(
-                    "failed",
+                    "failed_ocr",
                     {
-                        "error": f"页面解析失败: {error_message or '模型未返回结果'}",
+                        "error": f"OCR页面解析失败: {error_message or '模型未返回结果'}",
                         "total_pages": total_pages,
                         "processed_pages": total_pages - len(error_pages),
                     },
                 )
 
             raise RuntimeError(f"PDF 解析失败：共有 {len(error_pages)} 页解析错误")
-
-        if status_callback:
-            status_callback(
-                "parsing",
-                {
-                    "total_pages": total_pages,
-                },
-            )
+        
+        # OCR 成功完成
+        # 注意: vectorizing 由 json_to_elasticsearch 发送
 
         indexing_result = self.jsonExtractor.json_to_elasticsearch(
             contract_json,
             file_size=len(contents),
             status_callback=status_callback,
+            file_hash=file_hash,
         )
 
         return {
@@ -417,9 +442,10 @@ class PdfToElasticsearch:
         file_path: Path,
         *,
         status_callback: StatusCallback = None,
+        file_hash: str = None,
     ) -> Dict[str, Any]:
         contents = file_path.read_bytes()
-        return self.process_pdf_bytes(contents, file_path.name, status_callback=status_callback)
+        return self.process_pdf_bytes(contents, file_path.name, status_callback=status_callback, file_hash=file_hash)
 
     def start_process(self, file: UploadFile) -> Dict[str, Optional[Union[str, int]]]:
         try:

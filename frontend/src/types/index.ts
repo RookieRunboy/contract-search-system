@@ -155,3 +155,18 @@ export interface UploadQueueStatus {
   memory_percent_used: number;
   memory_is_low: boolean;
 }
+
+// 解析过程的详细状态
+export type DocumentParseStatus =
+  | 'pending'
+  | 'parsing' // Legacy
+  | 'parsing_images'
+  | 'parsing_ocr'
+  | 'vectorizing'
+  | 'metadata_extracting'
+  | 'completed'
+  | 'failed' // Legacy
+  | 'failed_images'
+  | 'failed_ocr'
+  | 'failed_vector'
+  | 'failed_metadata';

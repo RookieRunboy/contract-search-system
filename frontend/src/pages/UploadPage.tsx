@@ -18,6 +18,7 @@ import {
   Collapse,
   Spin,
   Modal,
+  Popover,
 } from 'antd';
 import {
   InboxOutlined,
@@ -32,9 +33,11 @@ import {
   ExperimentOutlined,
   SyncOutlined,
   CloudUploadOutlined,
+  InfoCircleOutlined,
 } from '@ant-design/icons';
-import { API_BASE_URL, deleteDocument, getUploadedDocuments, getDocumentDetail, downloadDocument, getUploadQueueStatus } from '../services/api';
+import { API_BASE_URL, deleteDocument, getUploadedDocuments, getDocumentDetail, downloadDocument, getUploadQueueStatus, retryUpload } from '../services/api';
 import MetadataEditModal from '../components/MetadataEditModal';
+import ProgressStepper from '../components/ProgressStepper';
 import type { ContractMetadata, UploadQueueStatus } from '../types';
 import type { ColumnsType } from 'antd/es/table';
 import type { UploadChangeParam } from 'antd/es/upload';
@@ -65,6 +68,8 @@ interface DocumentRecord {
   uploadId?: string;
   contractCode?: string;
   cirCode?: string;
+  error?: string;
+  message?: string;
 }
 
 type UploadDocumentRaw = Record<string, unknown>;
@@ -72,10 +77,16 @@ type UploadDocumentRaw = Record<string, unknown>;
 const STATUS_LABELS: Record<string, string> = {
   pending: '待解析',
   parsing: '正在转化为文本',
+  parsing_images: '正在转化为图片',
+  parsing_ocr: '正在OCR识别',
   vectorizing: '正在向量化',
   metadata_extracting: '正在提取元数据',
   completed: '解析成功',
   failed: '解析失败',
+  failed_images: '图片转换失败',
+  failed_ocr: 'OCR识别失败',
+  failed_vector: '向量化失败',
+  failed_metadata: '元数据提取失败',
 };
 
 const asString = (value: unknown): string | undefined => {
@@ -296,6 +307,7 @@ const UploadPage: FC = () => {
   const [deletePopoverKey, setDeletePopoverKey] = useState<string | null>(null);
   const [deleteLoadingKey, setDeleteLoadingKey] = useState<string | null>(null);
   const [downloadingKey, setDownloadingKey] = useState<string | null>(null);
+  const [retryLoadingKey, setRetryLoadingKey] = useState<string | null>(null);
 
   // 队列状态
   const [queueStatus, setQueueStatus] = useState<UploadQueueStatus | null>(null);
@@ -356,6 +368,9 @@ const UploadPage: FC = () => {
           const contractCode = pickString(doc, ['contract_code', 'contractCode']);
           const cirCode = pickString(doc, ['cir_code', 'cirCode']);
 
+          const error = pickString(doc, ['error']);
+          const message = pickString(doc, ['message']);
+
           return {
             contractKey,
             name: displayName,
@@ -375,6 +390,8 @@ const UploadPage: FC = () => {
             uploadId,
             contractCode,
             cirCode,
+            error,
+            message,
           };
         })
         .filter(Boolean) as DocumentRecord[];
@@ -397,6 +414,24 @@ const UploadPage: FC = () => {
       setLoading(false);
     }
   }, []);
+
+  const handleRetry = async (record: DocumentRecord) => {
+    if (!record.uploadId) {
+      message.error('无法重试：缺少任务ID');
+      return;
+    }
+    setRetryLoadingKey(record.contractKey);
+    try {
+      await retryUpload(record.uploadId);
+      message.success('任务已提交重试');
+      await fetchDocuments();
+    } catch (error) {
+      console.error('重试失败:', error);
+      message.error(error instanceof Error ? error.message : '重试任务失败');
+    } finally {
+      setRetryLoadingKey(null);
+    }
+  };
 
   const showDetail = async (record: DocumentRecord) => {
     setSelectedContractKey(record.contractKey);
@@ -551,7 +586,39 @@ const UploadPage: FC = () => {
 
       if (status === 'done') {
         const hasUploading = info.fileList.some((item) => item.status === 'uploading');
-        message.success(`${info.file.name} 上传成功`);
+
+        // 检查响应是否包含重复文件信息
+        const response = info.file.response as {
+          code?: number;
+          message?: string;
+          data?: {
+            success?: Array<{ pdf_name: string }>;
+            failed?: Array<{ pdf_name: string; error: string }>;
+            rejected?: Array<{
+              pdf_name: string;
+              reason: string;
+              reason_display: string;
+              existing_file: string;
+              message: string;
+            }>;
+          };
+        } | undefined;
+
+        const rejectedFiles = response?.data?.rejected || [];
+        const successFiles = response?.data?.success || [];
+
+        // 显示成功消息
+        if (successFiles.length > 0) {
+          message.success(`已加入解析队列 ${successFiles.length} 个文件`);
+        }
+
+        // 为每个被拒绝的重复文件显示警告
+        rejectedFiles.forEach((rejected) => {
+          const reasonText = rejected.reason_display || '重复';
+          const existingFile = rejected.existing_file ? ` (与 ${rejected.existing_file} 重复)` : '';
+          message.warning(`${rejected.pdf_name}: ${reasonText}${existingFile}`);
+        });
+
         setUploading(hasUploading);
 
         if (!hasUploading) {
@@ -578,18 +645,71 @@ const UploadPage: FC = () => {
   // 状态标签渲染
   const renderStatus = (record: DocumentRecord) => {
     const normalizedStatus = (record.status || 'completed').toLowerCase();
-    const statusMap: Record<string, { color: string; icon: ReactNode; text: string }> = {
-      pending: { color: 'default', icon: <ClockCircleOutlined />, text: STATUS_LABELS.pending },
-      parsing: { color: 'processing', icon: <SyncOutlined spin />, text: STATUS_LABELS.parsing },
-      vectorizing: { color: 'processing', icon: <CloudUploadOutlined />, text: STATUS_LABELS.vectorizing },
-      metadata_extracting: { color: 'processing', icon: <ExperimentOutlined />, text: STATUS_LABELS.metadata_extracting },
-      completed: { color: 'success', icon: <CheckCircleOutlined />, text: STATUS_LABELS.completed },
-      failed: { color: 'error', icon: <ExclamationCircleOutlined />, text: STATUS_LABELS.failed },
-      processing: { color: 'processing', icon: <SyncOutlined spin />, text: '处理中' },
-    };
+    const metadataStatus = (record.metadataStatus || '').toLowerCase();
 
-    const config = statusMap[normalizedStatus] || statusMap.processing;
-    const label = record.statusDisplay || config.text;
+    let color = 'default';
+    let icon: ReactNode = <ClockCircleOutlined />;
+    let text = '未知状态';
+    let spin = false;
+
+    // 基础状态判断
+    if (normalizedStatus === 'failed') {
+      color = 'error';
+      icon = <ExclamationCircleOutlined />;
+      text = STATUS_LABELS.failed || '解析失败';
+    } else if (normalizedStatus === 'pending') {
+      color = 'default';
+      icon = <ClockCircleOutlined />;
+      text = STATUS_LABELS.pending || '待解析';
+    } else if (['parsing', 'processing'].includes(normalizedStatus)) {
+      color = 'processing';
+      icon = <SyncOutlined spin />;
+      text = STATUS_LABELS.parsing || '正在解析';
+      text = STATUS_LABELS.parsing || '正在解析';
+      spin = true;
+    } else if (normalizedStatus === 'parsing_images') {
+      color = 'processing';
+      icon = <SyncOutlined spin />;
+      text = '正在转图片';
+      spin = true;
+    } else if (normalizedStatus === 'parsing_ocr') {
+      color = 'processing';
+      icon = <SyncOutlined spin />;
+      text = '正在识别文本';
+      spin = true;
+    } else if (normalizedStatus === 'vectorizing') {
+      color = 'processing';
+      icon = <CloudUploadOutlined />;
+      text = STATUS_LABELS.vectorizing || '正在向量化';
+    } else if (normalizedStatus === 'metadata_extracting' || metadataStatus === 'metadata_extracting' || metadataStatus === 'extracting') {
+      color = 'processing';
+      color = 'processing';
+      icon = <ExperimentOutlined spin={true} />;
+      text = STATUS_LABELS.metadata_extracting || '正在提取元数据';
+      // Given the previous code used <SyncOutlined spin />, distinct icons are good.
+      // Let's stick to simple composition.
+      icon = <ExperimentOutlined />;
+      text = STATUS_LABELS.metadata_extracting || '正在提取元数据';
+      // If we want it to look active, color processing is usually enough.
+    } else if (normalizedStatus === 'completed') {
+      if (metadataStatus === 'failed') {
+        color = 'warning';
+        icon = <ExclamationCircleOutlined />;
+        text = '元数据提取失败';
+      } else if (['extracted', 'success', 'completed'].includes(metadataStatus) || record.metadataExtracted) {
+        color = 'success';
+        icon = <CheckCircleOutlined />;
+        text = '已完成';
+      } else {
+        // 默认完成
+        color = 'success';
+        icon = <CheckCircleOutlined />;
+        text = '已完成';
+      }
+    } else {
+      // 其他情况
+      text = record.statusDisplay || normalizedStatus;
+    }
 
     let progressText = '';
     if (normalizedStatus === 'vectorizing' && record.totalPages && record.totalPages > 0) {
@@ -598,32 +718,65 @@ const UploadPage: FC = () => {
     }
 
     return (
-      <Tag color={config.color} icon={config.icon}>
-        {label}
-        {progressText}
-      </Tag>
+      <Popover
+        title={<Space><FileTextOutlined /> 解析进度详情</Space>}
+        content={
+          <div style={{ minWidth: 500, padding: '12px 0' }}>
+            <ProgressStepper
+              status={record.status}
+              errorMessage={record.error || record.message}
+              size="small"
+            />
+            {record.message && !record.error && (
+              <div style={{ marginTop: 8, color: '#1890ff' }}>
+                <InfoCircleOutlined /> {record.message}
+              </div>
+            )}
+          </div>
+        }
+        destroyTooltipOnHide
+      >
+        <Tag color={color} icon={spin ? <SyncOutlined spin /> : icon} style={{ cursor: 'pointer' }}>
+          {text}
+          {progressText}
+        </Tag>
+      </Popover>
     );
   };
 
-  // 元数据提取状态标签
-  const renderMetadataStatus = (record: DocumentRecord) => {
-    const status = record.metadataStatus?.toLowerCase();
-    if (record.metadataExtracted || status === 'extracted' || status === 'success' || status === 'completed') {
-      return <Tag color="green" icon={<CheckCircleOutlined />}>已提取</Tag>;
-    }
-    if (status === 'metadata_extracting' || status === 'extracting') {
-      return <Tag color="processing" icon={<SyncOutlined spin />}>提取中</Tag>;
-    }
-    if (status === 'empty') {
-      return <Tag color="orange" icon={<ClockCircleOutlined />}>暂无数据</Tag>;
-    }
-    if (status === 'skipped') {
-      return <Tag color="default">已跳过</Tag>;
-    }
-    if (status === 'failed') {
-      return <Tag color="error" icon={<ExclamationCircleOutlined />}>提取失败</Tag>;
-    }
-    return <Tag color="orange" icon={<ClockCircleOutlined />}>未提取</Tag>;
+
+
+  // Click-to-copy component for codes
+  const ClickToCopy: FC<{ text: string }> = ({ text }) => {
+    const [hover, setHover] = useState(false);
+
+    const handleCopy = (e: React.MouseEvent) => {
+      e.stopPropagation();
+      navigator.clipboard.writeText(text);
+      message.success('已复制到剪贴板');
+    };
+
+    return (
+      <div
+        onClick={handleCopy}
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => setHover(false)}
+        style={{
+          cursor: 'pointer',
+          padding: '2px 6px',
+          borderRadius: '4px',
+          border: `1px solid ${hover ? '#1677ff' : 'transparent'}`,
+          backgroundColor: hover ? '#f0f5ff' : 'transparent',
+          transition: 'all 0.2s',
+          display: 'inline-block',
+          maxWidth: '100%',
+          wordBreak: 'break-all'
+        }}
+        title="点击复制"
+      >
+        {text}
+      </div>
+    );
   };
 
   // 表格列定义
@@ -632,13 +785,11 @@ const UploadPage: FC = () => {
       title: '合同名称',
       dataIndex: 'name',
       key: 'name',
-      width: '22%',
+      width: undefined, // Allow flex width
       render: (text: string) => (
-        <Space>
-          <FileTextOutlined />
-          <Tooltip title={text}>
-            <Text strong ellipsis style={{ maxWidth: 200 }}>{text}</Text>
-          </Tooltip>
+        <Space align="start">
+          <FileTextOutlined style={{ marginTop: '4px' }} />
+          <Text strong style={{ wordBreak: 'break-all', whiteSpace: 'normal' }}>{text}</Text>
         </Space>
       ),
     },
@@ -646,104 +797,114 @@ const UploadPage: FC = () => {
       title: '合同编码',
       dataIndex: 'contractCode',
       key: 'contractCode',
-      width: '10%',
+      width: 150,
       render: (code: string | undefined) => (
-        code ? <Text copyable={{ text: code }}>{code}</Text> : <Text type="secondary">-</Text>
+        code ? <ClickToCopy text={code} /> : <Text type="secondary">-</Text>
       ),
     },
     {
-      title: 'CIR编码',
+      title: '合同注册编码',
       dataIndex: 'cirCode',
       key: 'cirCode',
-      width: '12%',
+      width: 160,
       render: (code: string | undefined) => (
-        code ? <Text copyable={{ text: code }}>{code}</Text> : <Text type="secondary">-</Text>
+        code ? <ClickToCopy text={code} /> : <Text type="secondary">-</Text>
       ),
     },
     {
       title: '上传时间',
       dataIndex: 'uploadTime',
       key: 'uploadTime',
-      width: '12%',
+      width: 160,
       render: (text: string) => <Text type="secondary">{text}</Text>,
     },
     {
-      title: '解析状态',
+      title: '状态',
       dataIndex: 'status',
       key: 'status',
-      width: '12%',
+      width: 160,
       render: (_: string, record) => renderStatus(record),
-    },
-    {
-      title: '元数据状态',
-      dataIndex: 'metadataStatus',
-      key: 'metadataStatus',
-      width: '10%',
-      render: (_: string | undefined, record) => renderMetadataStatus(record),
     },
     {
       title: '页数',
       dataIndex: 'pageCount',
       key: 'pageCount',
-      width: '6%',
+      width: 80,
       render: (count: number) => <Badge count={count} color="blue" />,
     },
     {
       title: '文件大小',
       dataIndex: 'fileSize',
       key: 'fileSize',
-      width: '8%',
+      width: 100,
       render: (size: string) => <Text type="secondary">{size}</Text>,
     },
     {
       title: '操作',
       key: 'actions',
-      width: '10%',
-      render: (_, record) => (
-        <Space size="small">
-          <Tooltip title="查看详情" mouseEnterDelay={0.5} mouseLeaveDelay={0.1} destroyOnHidden trigger={["hover"]} getPopupContainer={() => document.body}>
-            <Button
-              type="text"
-              icon={<EyeOutlined />}
-              onClick={() => showDetail(record)}
-            />
-          </Tooltip>
-          <Tooltip title="查看元数据" mouseEnterDelay={0.5} mouseLeaveDelay={0.1} destroyOnHidden trigger={["hover"]} getPopupContainer={() => document.body}>
-            <Button
-              type="text"
-              icon={<ExperimentOutlined />}
-              onClick={() => handleViewMetadata(record.contractKey)}
-            />
-          </Tooltip>
-          <Tooltip title="下载文档" mouseEnterDelay={0.5} mouseLeaveDelay={0.1} destroyOnHidden trigger={["hover"]} getPopupContainer={() => document.body}>
-            <Button
-              type="text"
-              icon={<DownloadOutlined />}
-              loading={downloadingKey === record.contractKey}
-              onClick={() => handleDownloadDocument(record)}
-            />
-          </Tooltip>
-          <Popconfirm
-            title="确定删除此文档吗？"
-            okText="确定"
-            cancelText="取消"
-            placement="topRight"
-            open={deletePopoverKey === record.contractKey}
-            okButtonProps={{ loading: deleteLoadingKey === record.contractKey }}
-            onOpenChange={(visible) => {
-              setDeletePopoverKey(visible ? record.contractKey : null);
-            }}
-            onConfirm={() => handleDelete(record)}
-          >
-            <Button
-              type="text"
-              icon={<DeleteOutlined />}
-              danger
-              title="删除文档"
-            />
-          </Popconfirm>
-        </Space>
-      ),
+      width: 160,
+      render: (_, record) => {
+        // 判断是否允许重试：失败状态允许重试
+        const allowRetry = record.status.startsWith('failed') || record.status === 'failed';
+
+        return (
+          <Space size="small">
+            {allowRetry && (
+              <Tooltip title="重试任务" mouseEnterDelay={0.5} getPopupContainer={() => document.body}>
+                <Button
+                  type="text"
+                  icon={<ReloadOutlined />}
+                  loading={retryLoadingKey === record.contractKey}
+                  onClick={() => handleRetry(record)}
+                  style={{ color: '#faad14' }}
+                />
+              </Tooltip>
+            )}
+
+            <Tooltip title="查看详情" mouseEnterDelay={0.5} mouseLeaveDelay={0.1} destroyOnHidden trigger={["hover"]} getPopupContainer={() => document.body}>
+              <Button
+                type="text"
+                icon={<EyeOutlined />}
+                onClick={() => showDetail(record)}
+              />
+            </Tooltip>
+            <Tooltip title="查看元数据" mouseEnterDelay={0.5} mouseLeaveDelay={0.1} destroyOnHidden trigger={["hover"]} getPopupContainer={() => document.body}>
+              <Button
+                type="text"
+                icon={<ExperimentOutlined />}
+                onClick={() => handleViewMetadata(record.contractKey)}
+              />
+            </Tooltip>
+            <Tooltip title="下载文档" mouseEnterDelay={0.5} mouseLeaveDelay={0.1} destroyOnHidden trigger={["hover"]} getPopupContainer={() => document.body}>
+              <Button
+                type="text"
+                icon={<DownloadOutlined />}
+                loading={downloadingKey === record.contractKey}
+                onClick={() => handleDownloadDocument(record)}
+              />
+            </Tooltip>
+            <Popconfirm
+              title="确定删除此文档吗？"
+              okText="确定"
+              cancelText="取消"
+              placement="topRight"
+              open={deletePopoverKey === record.contractKey}
+              okButtonProps={{ loading: deleteLoadingKey === record.contractKey }}
+              onOpenChange={(visible) => {
+                setDeletePopoverKey(visible ? record.contractKey : null);
+              }}
+              onConfirm={() => handleDelete(record)}
+            >
+              <Button
+                type="text"
+                icon={<DeleteOutlined />}
+                danger
+                title="删除文档"
+              />
+            </Popconfirm>
+          </Space>
+        );
+      },
     },
   ];
 

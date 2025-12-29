@@ -1,5 +1,6 @@
 import asyncio
 import gc
+import hashlib
 from datetime import datetime, timezone, timedelta
 import logging
 import os
@@ -484,7 +485,7 @@ def _compose_document_entry(
     return output
 
 
-async def _process_uploaded_file(upload_id: str, file_path: Path) -> None:
+async def _process_uploaded_file(upload_id: str, file_path: Path, file_hash: Optional[str] = None) -> None:
     """处理上传的 PDF 文件，包含并发控制和内存保护。"""
 
     def _status_callback(stage: str, payload: Optional[Dict[str, Any]]) -> None:
@@ -538,17 +539,140 @@ async def _process_uploaded_file(upload_id: str, file_path: Path) -> None:
                 pdf_to_es.process_file_path,
                 file_path,
                 status_callback=_status_callback,
+                file_hash=file_hash,  # 传递文件哈希
             )
         except Exception as exc:  # noqa: BLE001
             print(f"ERROR: 处理上传文件失败 upload_id={upload_id}, file={file_path.name}: {exc}")
             try:
-                status_manager.update_upload_record(upload_id, status="failed", error=str(exc))
+                # 检查当前状态是否已经是具体的失败状态
+                record = status_manager.get_upload_record(upload_id)
+                current_status = record.get("status", "") if record else ""
+                
+                # 如果当前状态已经是 failed_xxx (由 pdf_to_es设置)，则不再覆盖为通用的 failed
+                if not current_status.startswith("failed_"):
+                    status_manager.update_upload_record(upload_id, status="failed", error=str(exc))
+                else:
+                    logger.info(f"保留现有失败状态: {current_status} upload_id={upload_id}")
+
             except Exception as update_exc:  # noqa: BLE001
                 print(f"WARNING: 记录失败状态出错 upload_id={upload_id}: {update_exc}")
         finally:
             # 强制垃圾回收，释放内存
             gc.collect()
             logger.debug(f"已完成垃圾回收 upload_id={upload_id}")
+
+
+async def _retry_metadata_extraction(upload_id: str, contract_name: str) -> None:
+    """仅重试元数据提取任务。"""
+    try:
+        status_manager.update_upload_record(upload_id, status="metadata_extracting", message="正在重试元数据提取...")
+        
+        # 1. 从ES获取全文
+        index_name = es_searcher.index_name
+        query = {
+            "size": 10000,
+            "_source": ["text"],
+            "query": {
+                "term": {
+                    "contractName.keyword": contract_name
+                }
+            },
+            "sort": [{"pageId": "asc"}]
+        }
+        
+        response = await run_in_threadpool(es_searcher.es.search, index=index_name, body=query)
+        hits = response.get("hits", {}).get("hits", [])
+        
+        if not hits:
+            raise ValueError(f"未在ES中找到合同 {contract_name} 的任何文本")
+            
+        full_text = " ".join([hit.get("_source", {}).get("text", "") for hit in hits])
+        
+        # 2. 调用提取器
+        # extract_and_update_metadata 是同步方法，在线程池运行
+        result = await run_in_threadpool(
+            pdf_to_es.jsonExtractor.extract_and_update_metadata, 
+            contract_name, 
+            full_text
+        )
+        
+        if result.get("success"):
+            status_manager.update_upload_record(
+                upload_id, 
+                status="completed", 
+                metadata_status="extracted",
+                has_metadata=True,
+                message="重试成功"
+            )
+        else:
+            error_msg = result.get("error") or "未知错误"
+            status_manager.update_upload_record(
+                upload_id, 
+                status="failed_metadata", 
+                metadata_status="failed",
+                error=error_msg
+            )
+            
+    except Exception as exc:
+        logger.error(f"重试元数据提取失败: {exc}")
+        status_manager.update_upload_record(
+            upload_id, 
+            status="failed_metadata", 
+            error=f"重试失败: {str(exc)}"
+        )
+
+
+@app.post("/upload/retry/{upload_id}")
+async def retry_upload(
+    upload_id: str, 
+    current_user: Dict[str, Any] = Depends(require_admin)
+):
+    """重试失败的上传任务。"""
+    record = status_manager.get_upload_record(upload_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="任务记录不存在")
+        
+    current_status = record.get("status", "")
+    contract_name = record.get("contract_name")
+    
+    # 情况1: 元数据失败 -> 仅重试元数据
+    if current_status == "failed_metadata":
+        if not contract_name:
+            raise HTTPException(status_code=400, detail="合同名称丢失，无法重试元数据提取")
+            
+        # 启动后台任务重试元数据
+        task = asyncio.create_task(_retry_metadata_extraction(upload_id, contract_name))
+        _register_background_task(task)
+        
+        return {"code": 200, "message": "已提交元数据重试任务", "upload_id": upload_id}
+    
+    # 情况2: 其他失败 (OCR, 图片, 向量, 或 pending/failed) -> 全量重试
+    else:
+        file_name = record.get("file_name")
+        if not file_name:
+            # 尝试回退名称
+             file_name = f"{contract_name}.pdf" if contract_name else None
+             
+        if not file_name:
+            raise HTTPException(status_code=400, detail="文件名丢失，无法重试")
+            
+        file_path = UPLOAD_DIR / file_name
+        if not file_path.exists():
+            raise HTTPException(status_code=400, detail=f"原始文件 {file_name} 已不存在，请重新上传")
+            
+        # 重置状态
+        status_manager.update_upload_record(
+            upload_id, 
+            status="pending", 
+            error=None,
+            message="正在重试..."
+        )
+        
+        # 重新加入全量处理队列
+        task = asyncio.create_task(_process_uploaded_file(upload_id, file_path))
+        _register_background_task(task)
+        
+        return {"code": 200, "message": "任务已重新加入处理队列", "upload_id": upload_id}
 
 
 @app.get("/document/list")
@@ -713,6 +837,193 @@ def _extract_codes_from_filename(filename: str) -> Dict[str, Optional[str]]:
     
     # 模式D: 无编码
     return result
+
+
+# ========== File Duplicate Detection Functions ==========
+
+def _compute_file_hash(content: bytes) -> str:
+    """
+    计算文件内容的 SHA256 哈希值。
+    
+    Args:
+        content: 文件的字节内容
+        
+    Returns:
+        格式为 'sha256:xxxx...' 的哈希字符串
+    """
+    sha256_hash = hashlib.sha256(content).hexdigest()
+    return f"sha256:{sha256_hash}"
+
+
+def _check_filename_exists(filename: str) -> Optional[str]:
+    """
+    检查 uploaded_contracts 目录是否有同名文件。
+    
+    Args:
+        filename: 要检查的文件名
+        
+    Returns:
+        已存在的文件路径，如果不存在返回 None
+    """
+    file_path = UPLOAD_DIR / filename
+    if file_path.exists():
+        return str(file_path)
+    return None
+
+
+def _check_content_hash_exists(file_hash: str) -> Optional[Dict[str, str]]:
+    """
+    查询 ES 中是否存在相同哈希值的文档。
+    
+    Args:
+        file_hash: 文件内容的哈希值
+        
+    Returns:
+        匹配信息字典 {'contract_name': '...', 'file_name': '...'} 或 None
+    """
+    try:
+        if not es_searcher.es:
+            return None
+        
+        index_name = es_searcher.index_name
+        if not es_searcher.es.indices.exists(index=index_name):
+            return None
+        
+        # 查询 document_metadata.file_hash 字段
+        query = {
+            "query": {
+                "bool": {
+                    "must": [
+                        {"term": {"document_metadata.file_hash": file_hash}},
+                        {"term": {"pageId": 1}}  # 只查第一页，因为哈希只存在第一页
+                    ]
+                }
+            },
+            "_source": ["contractName"],
+            "size": 1
+        }
+        
+        result = es_searcher.es.search(index=index_name, body=query)
+        hits = result.get('hits', {}).get('hits', [])
+        
+        if hits:
+            contract_name = hits[0].get('_source', {}).get('contractName', '')
+            return {
+                "contract_name": contract_name,
+                "file_name": f"{contract_name}.pdf" if contract_name else None
+            }
+        
+        return None
+    except Exception as exc:
+        logger.warning(f"查询文件哈希时出错: {exc}")
+        return None
+
+
+def _check_file_duplicates(filename: str, content: bytes) -> Dict[str, Any]:
+    """
+    检查文件是否重复（文件名 + 内容双重检测）。
+    
+    Args:
+        filename: 文件名
+        content: 文件内容字节
+        
+    Returns:
+        {
+            "is_duplicate": bool,
+            "duplicate_type": "filename" | "content" | None,
+            "existing_file": str | None,  # 已存在的文件名
+            "file_hash": str,              # 当前文件的哈希值
+            "message": str
+        }
+    """
+    result: Dict[str, Any] = {
+        "is_duplicate": False,
+        "duplicate_type": None,
+        "existing_file": None,
+        "file_hash": None,
+        "message": ""
+    }
+    
+    # 计算文件哈希（无论是否重复都返回哈希值）
+    file_hash = _compute_file_hash(content)
+    result["file_hash"] = file_hash
+    
+    # 第一层检测：文件名是否存在
+    existing_path = _check_filename_exists(filename)
+    if existing_path:
+        result["is_duplicate"] = True
+        result["duplicate_type"] = "filename"
+        result["existing_file"] = filename
+        result["message"] = f"同名文件已存在: {filename}"
+        return result
+    
+    # 第二层检测：内容哈希是否存在
+    existing_doc = _check_content_hash_exists(file_hash)
+    if existing_doc:
+        result["is_duplicate"] = True
+        result["duplicate_type"] = "content"
+        result["existing_file"] = existing_doc.get("file_name") or existing_doc.get("contract_name")
+        result["message"] = f"相同内容已存在: {result['existing_file']}"
+        return result
+    
+    result["message"] = "文件可以上传"
+    return result
+
+
+def _check_batch_duplicates(files_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    检测同批次上传中的重复文件。
+    
+    Args:
+        files_data: 文件信息列表 [{"filename": str, "content": bytes}, ...]
+        
+    Returns:
+        检测结果列表，每个元素包含:
+        {
+            "filename": str,
+            "content": bytes,
+            "is_batch_duplicate": bool,
+            "batch_duplicate_of": str | None,  # 批次内重复的原始文件名
+            "file_hash": str
+        }
+    """
+    results: List[Dict[str, Any]] = []
+    seen_filenames: Dict[str, int] = {}       # filename -> first seen index
+    seen_hashes: Dict[str, str] = {}          # hash -> first seen filename
+    
+    for idx, file_data in enumerate(files_data):
+        filename = file_data["filename"]
+        content = file_data["content"]
+        file_hash = _compute_file_hash(content)
+        
+        result = {
+            "filename": filename,
+            "content": content,
+            "is_batch_duplicate": False,
+            "batch_duplicate_of": None,
+            "file_hash": file_hash
+        }
+        
+        # 检查文件名重复
+        if filename in seen_filenames:
+            result["is_batch_duplicate"] = True
+            result["batch_duplicate_of"] = filename
+            results.append(result)
+            continue
+        
+        # 检查内容哈希重复
+        if file_hash in seen_hashes:
+            result["is_batch_duplicate"] = True
+            result["batch_duplicate_of"] = seen_hashes[file_hash]
+            results.append(result)
+            continue
+        
+        # 记录当前文件
+        seen_filenames[filename] = idx
+        seen_hashes[file_hash] = filename
+        results.append(result)
+    
+    return results
 
 
 @app.post("/auth/login")
@@ -891,33 +1202,117 @@ async def upload_document(
     files: List[UploadFile] = File(..., description="上传的PDF合同文件，支持一次选择多个"),
     current_user: Dict[str, Any] = Depends(require_admin),
 ):
-    """上传PDF文档并异步执行解析流程。"""
+    """上传PDF文档并异步执行解析流程。包含文件重复检测。"""
 
     if not files:
         raise HTTPException(status_code=400, detail="请至少上传一个文件")
 
     success_results: List[Dict[str, Union[str, int, None]]] = []
     failed_results: List[Dict[str, Union[str, int]]] = []
+    rejected_results: List[Dict[str, Any]] = []  # 新增：重复文件列表
 
     allowed_types = {'application/pdf'}
     max_file_size = 100 * 1024 * 1024  # 100MB
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
+    # Step 1: 读取所有文件内容，进行基本验证
+    files_data: List[Dict[str, Any]] = []
     for upload in files:
         filename = upload.filename or "unknown.pdf"
         normalized_name = Path(filename).name
-        file_path: Optional[Path] = None
-
+        
         try:
             if upload.content_type not in allowed_types:
-                raise HTTPException(status_code=400, detail=f"文件 {normalized_name} 类型不支持")
-
+                failed_results.append({
+                    "status": "failed",
+                    "pdf_name": normalized_name,
+                    "error": f"文件 {normalized_name} 类型不支持",
+                    "code": 400,
+                })
+                continue
+            
             contents = await upload.read()
             if not contents:
-                raise HTTPException(status_code=400, detail=f"文件 {normalized_name} 内容为空")
+                failed_results.append({
+                    "status": "failed",
+                    "pdf_name": normalized_name,
+                    "error": f"文件 {normalized_name} 内容为空",
+                    "code": 400,
+                })
+                continue
             if len(contents) > max_file_size:
-                raise HTTPException(status_code=400, detail=f"文件 {normalized_name} 超过大小限制")
+                failed_results.append({
+                    "status": "failed",
+                    "pdf_name": normalized_name,
+                    "error": f"文件 {normalized_name} 超过大小限制",
+                    "code": 400,
+                })
+                continue
+            
+            files_data.append({
+                "filename": normalized_name,
+                "content": contents,
+                "upload": upload,
+            })
+        except Exception as e:
+            failed_results.append({
+                "status": "failed",
+                "pdf_name": normalized_name,
+                "error": str(e),
+                "code": 500,
+            })
+        finally:
+            try:
+                await upload.close()
+            except Exception:
+                pass
 
+    if not files_data:
+        if failed_results:
+            first_error = failed_results[0]
+            raise HTTPException(
+                status_code=first_error.get("code", 500),
+                detail=first_error.get("error", "文档上传失败"),
+            )
+        raise HTTPException(status_code=400, detail="没有有效的文件可上传")
+
+    # Step 2: 批次内部重复检测
+    batch_results = _check_batch_duplicates(files_data)
+    
+    # Step 3: 处理每个文件
+    for batch_item in batch_results:
+        normalized_name = batch_item["filename"]
+        contents = batch_item["content"]
+        file_hash = batch_item["file_hash"]
+        file_path: Optional[Path] = None
+        
+        try:
+            # 检查批次内重复
+            if batch_item["is_batch_duplicate"]:
+                rejected_results.append({
+                    "pdf_name": normalized_name,
+                    "reason": "batch_duplicate",
+                    "reason_display": "批次内重复",
+                    "existing_file": batch_item["batch_duplicate_of"],
+                    "message": f"此文件与同批次中的 {batch_item['batch_duplicate_of']} 重复",
+                })
+                continue
+            
+            # 检查系统级重复（文件名 + 内容哈希）
+            dup_result = _check_file_duplicates(normalized_name, contents)
+            
+            if dup_result["is_duplicate"]:
+                reason_display = "同名文件已存在" if dup_result["duplicate_type"] == "filename" else "相同内容已存在"
+                rejected_results.append({
+                    "pdf_name": normalized_name,
+                    "reason": f"{dup_result['duplicate_type']}_duplicate",
+                    "reason_display": reason_display,
+                    "existing_file": dup_result["existing_file"],
+                    "message": dup_result["message"],
+                })
+                continue
+            
+            # 写入文件
             file_path = UPLOAD_DIR / normalized_name
             with open(file_path, "wb") as destination:
                 destination.write(contents)
@@ -927,9 +1322,10 @@ async def upload_document(
                 file_name=normalized_name,
                 contract_name=contract_name,
                 file_size_bytes=len(contents),
+                file_hash=file_hash,  # 存储哈希值
             )
 
-            task = asyncio.create_task(_process_uploaded_file(upload_id, file_path))
+            task = asyncio.create_task(_process_uploaded_file(upload_id, file_path, file_hash))
             _register_background_task(task)
 
             success_results.append({
@@ -948,9 +1344,9 @@ async def upload_document(
             if file_path and file_path.exists():
                 try:
                     file_path.unlink()
-                except Exception:  # noqa: BLE001
+                except Exception:
                     pass
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             failed_results.append({
                 "status": "failed",
                 "pdf_name": normalized_name,
@@ -960,15 +1356,11 @@ async def upload_document(
             if file_path and file_path.exists():
                 try:
                     file_path.unlink()
-                except Exception:  # noqa: BLE001
+                except Exception:
                     pass
-        finally:
-            try:
-                await upload.close()
-            except Exception:  # noqa: BLE001
-                pass
 
-    if not success_results and failed_results:
+    # 构建响应消息
+    if not success_results and not rejected_results and failed_results:
         first_error = failed_results[0]
         raise HTTPException(
             status_code=first_error.get("code", 500),
@@ -978,6 +1370,8 @@ async def upload_document(
     message_parts = []
     if success_results:
         message_parts.append(f"已加入解析队列 {len(success_results)} 个文件")
+    if rejected_results:
+        message_parts.append(f"跳过 {len(rejected_results)} 个重复文件")
     if failed_results:
         message_parts.append(f"失败 {len(failed_results)} 个文件")
 
@@ -987,6 +1381,7 @@ async def upload_document(
         "data": {
             "success": success_results,
             "failed": failed_results,
+            "rejected": rejected_results,  # 新增：重复文件列表
         }
     }
 

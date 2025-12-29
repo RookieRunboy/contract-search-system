@@ -1,6 +1,6 @@
 # 文件重复检测功能提案
 
-## 状态: PROPOSED
+## 状态: IMPLEMENTED
 
 ## 概述
 

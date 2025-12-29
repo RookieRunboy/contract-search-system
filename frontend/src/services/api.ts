@@ -439,4 +439,14 @@ export const getUploadQueueStatus = async (): Promise<UploadQueueStatus | null> 
   }
 };
 
+// 重试上传任务
+export const retryUpload = async (uploadId: string): Promise<any> => {
+  try {
+    const result = await api.post(`/upload/retry/${uploadId}`);
+    return result;
+  } catch (error: any) {
+    throw new Error(error.response?.data?.detail || error.message || '重试任务失败');
+  }
+};
+
 export default api;

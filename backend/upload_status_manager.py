@@ -13,11 +13,17 @@ class UploadStatusManager:
 
     STATUS_LABELS = {
         "pending": "待解析",
-        "parsing": "正在转化为文本",
+        "parsing": "正在转化为文本",  # 兼容旧状态
+        "parsing_images": "正在转化为图片",
+        "parsing_ocr": "正在OCR识别",
         "vectorizing": "正在向量化",
         "metadata_extracting": "正在提取元数据",
         "completed": "解析成功",
-        "failed": "解析失败",
+        "failed": "解析失败",  # 兼容旧状态
+        "failed_images": "图片转换失败",
+        "failed_ocr": "OCR识别失败",
+        "failed_vector": "向量化失败",
+        "failed_metadata": "元数据提取失败",
     }
 
     def __init__(
@@ -80,6 +86,7 @@ class UploadStatusManager:
         file_name: str,
         contract_name: str,
         file_size_bytes: Optional[int] = None,
+        file_hash: Optional[str] = None,
     ) -> str:
         upload_id = uuid.uuid4().hex
         now = datetime.now(timezone.utc)
@@ -95,6 +102,7 @@ class UploadStatusManager:
             "page_count": None,
             "processed_pages": 0,
             "file_size_bytes": file_size_bytes,
+            "file_hash": file_hash,  # 存储文件哈希
             "created_at": now.isoformat(),
             "updated_at": now.isoformat(),
         }

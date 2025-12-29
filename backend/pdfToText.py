@@ -244,14 +244,23 @@ class MultiModalTextExtractor:
         output_path: Optional[Path] = None,
         pdf_name: Optional[str] = None,
         dpi: int = 220,
+        status_callback: Optional[Callable[[str, Dict[str, Any]], None]] = None,
     ) -> List[Dict[str, object]]:
         """识别整份合同并返回带页码的文本列表。"""
         pdf_path = Path(pdf_path)
+
+        if status_callback:
+            status_callback("parsing_images", {"message": "正在将PDF转换为图像..."})
+
         images = self.pdf_to_images(pdf_path, dpi=dpi)
         fallback_texts = self._load_fallback_texts(pdf_path)
 
         results: List[Dict[str, object]] = []
         start = time.time()
+        total_pages = len(images)
+
+        if status_callback:
+            status_callback("parsing_ocr", {"message": "正在识别图像文本...", "total_pages": total_pages, "processed_pages": 0})
 
         for page_num, image in enumerate(images, start=1):
             try:
@@ -293,6 +302,9 @@ class MultiModalTextExtractor:
                 except Exception:
                     pass
 
+                if status_callback:
+                    status_callback("parsing_ocr", {"total_pages": total_pages, "processed_pages": page_num})
+
         # 清理 images 列表引用，帮助 GC 回收内存
         images.clear()
 
@@ -314,6 +326,7 @@ class MultiModalTextExtractor:
         pdf_bytes: bytes,
         pdf_name: Optional[str] = None,
         dpi: int = 220,
+        status_callback: Optional[Callable[[str, Dict[str, Any]], None]] = None,
     ) -> List[Dict[str, object]]:
         """直接处理 PDF 字节内容。"""
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp_file:
@@ -321,7 +334,7 @@ class MultiModalTextExtractor:
             tmp_path = Path(tmp_file.name)
 
         try:
-            return self.process_contract(tmp_path, output_path=None, pdf_name=pdf_name, dpi=dpi)
+            return self.process_contract(tmp_path, output_path=None, pdf_name=pdf_name, dpi=dpi, status_callback=status_callback)
         finally:
             try:
                 tmp_path.unlink(missing_ok=True)

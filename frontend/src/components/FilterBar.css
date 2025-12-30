@@ -1,0 +1,260 @@
+/* FilterBar - Intel-style vertical filter list */
+
+.filter-bar {
+  margin-top: 12px;
+  padding: 16px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  border: 1px solid #e9ecef;
+}
+
+.filter-bar-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Filter Row */
+.filter-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: #ffffff;
+  border-radius: 6px;
+  border: 1px solid #e0e0e0;
+  transition: all 0.2s ease;
+}
+
+.filter-row:hover {
+  border-color: #667eea;
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.1);
+}
+
+.filter-row-empty {
+  background: #fafafa;
+  border-style: dashed;
+}
+
+.filter-row-empty:hover {
+  background: #ffffff;
+}
+
+/* Filter Type Selector - Intel dark style */
+.filter-type-select {
+  min-width: 160px;
+  width: 160px;
+  flex-shrink: 0;
+}
+
+.filter-type-select .ant-select-selector {
+  background: #1a1a2e !important;
+  border-color: #1a1a2e !important;
+  color: #ffffff !important;
+  border-radius: 4px;
+}
+
+.filter-type-select .ant-select-selection-placeholder {
+  color: rgba(255, 255, 255, 0.6) !important;
+}
+
+.filter-type-select .ant-select-selection-item {
+  color: #ffffff !important;
+}
+
+.filter-type-select .ant-select-arrow {
+  color: rgba(255, 255, 255, 0.8) !important;
+}
+
+.filter-type-select .ant-select-clear {
+  background: #1a1a2e !important;
+  color: rgba(255, 255, 255, 0.8) !important;
+}
+
+.filter-type-select:hover .ant-select-selector {
+  border-color: #667eea !important;
+}
+
+.filter-type-select.ant-select-focused .ant-select-selector {
+  border-color: #667eea !important;
+  box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2) !important;
+}
+
+/* Filter Value Container */
+.filter-value-container {
+  flex: 1;
+  min-width: 0;
+}
+
+.filter-value-select {
+  width: 100%;
+}
+
+/* Remove Button */
+.filter-remove-button {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  color: #999999;
+  transition: all 0.2s ease;
+}
+
+.filter-remove-button:hover {
+  color: #ff4d4f !important;
+  background: rgba(255, 77, 79, 0.1) !important;
+}
+
+.filter-remove-placeholder {
+  width: 32px;
+  flex-shrink: 0;
+}
+
+/* Filter Bar Footer */
+.filter-bar-footer {
+  margin-top: 12px;
+  text-align: right;
+  padding-top: 12px;
+  border-top: 1px solid #e9ecef;
+}
+
+.clear-all-button {
+  color: #666666;
+}
+
+.clear-all-button:hover {
+  color: #ff4d4f !important;
+}
+
+/* Date Filter Input */
+.date-filter-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.date-picker-start,
+.date-picker-end {
+  flex: 1;
+  min-width: 0;
+}
+
+.date-separator {
+  color: #999999;
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+/* Amount Filter Input */
+.amount-filter-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.amount-input-min,
+.amount-input-max {
+  flex: 1;
+  min-width: 0;
+}
+
+.amount-separator {
+  color: #999999;
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+/* Entity Filter Select */
+.entity-filter-select {
+  width: 100%;
+}
+
+/* Category Filter Select */
+.category-filter-select {
+  width: 100%;
+}
+
+/* Hierarchical Category Filter */
+.hierarchical-category-filter {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+}
+
+.category-level1-select {
+  min-width: 160px;
+  width: 180px;
+  flex-shrink: 0;
+}
+
+.category-level2-select {
+  flex: 1;
+  min-width: 0;
+}
+
+
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .filter-row {
+    flex-wrap: wrap;
+  }
+
+  .filter-type-select {
+    min-width: 100%;
+    width: 100%;
+  }
+
+  .filter-value-container {
+    width: 100%;
+  }
+
+  .filter-remove-button {
+    position: absolute;
+    right: 8px;
+    top: 8px;
+  }
+
+  .filter-row {
+    position: relative;
+    padding-right: 40px;
+  }
+
+  .date-filter-input {
+    flex-direction: column;
+  }
+
+  .date-picker-start,
+  .date-picker-end {
+    width: 100%;
+  }
+
+  .date-separator {
+    transform: rotate(90deg);
+  }
+
+  .amount-filter-input {
+    flex-direction: column;
+  }
+
+  .amount-input-min,
+  .amount-input-max {
+    width: 100%;
+  }
+
+  .amount-separator {
+    display: none;
+  }
+}
+
+/* Ant Design Dropdown Override for dark selector */
+.ant-select-dropdown .ant-select-item-option-selected {
+  background-color: rgba(102, 126, 234, 0.1);
+}
+
+.ant-select-dropdown .ant-select-item-option-active {
+  background-color: rgba(102, 126, 234, 0.05);
+}

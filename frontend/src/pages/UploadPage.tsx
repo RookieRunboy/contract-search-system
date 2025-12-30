@@ -786,6 +786,7 @@ const UploadPage: FC = () => {
       dataIndex: 'name',
       key: 'name',
       width: undefined, // Allow flex width
+      minWidth: 200, // Ensure minimum readable width on small screens
       render: (text: string) => (
         <Space align="start">
           <FileTextOutlined style={{ marginTop: '4px' }} />
@@ -797,7 +798,7 @@ const UploadPage: FC = () => {
       title: '合同编码',
       dataIndex: 'contractCode',
       key: 'contractCode',
-      width: 150,
+      width: 130,
       render: (code: string | undefined) => (
         code ? <ClickToCopy text={code} /> : <Text type="secondary">-</Text>
       ),
@@ -806,7 +807,7 @@ const UploadPage: FC = () => {
       title: '合同注册编码',
       dataIndex: 'cirCode',
       key: 'cirCode',
-      width: 160,
+      width: 140,
       render: (code: string | undefined) => (
         code ? <ClickToCopy text={code} /> : <Text type="secondary">-</Text>
       ),
@@ -815,14 +816,14 @@ const UploadPage: FC = () => {
       title: '上传时间',
       dataIndex: 'uploadTime',
       key: 'uploadTime',
-      width: 160,
+      width: 140,
       render: (text: string) => <Text type="secondary">{text}</Text>,
     },
     {
       title: '状态',
       dataIndex: 'status',
       key: 'status',
-      width: 160,
+      width: 130,
       render: (_: string, record) => renderStatus(record),
     },
     {
@@ -842,7 +843,7 @@ const UploadPage: FC = () => {
     {
       title: '操作',
       key: 'actions',
-      width: 160,
+      width: 140,
       render: (_, record) => {
         // 判断是否允许重试：失败状态允许重试
         const allowRetry = record.status.startsWith('failed') || record.status === 'failed';
@@ -1144,6 +1145,7 @@ const UploadPage: FC = () => {
           dataSource={documents}
           rowKey="contractKey"
           loading={loading}
+          scroll={{ x: 1100 }}
           pagination={{
             pageSize: 10,
             showSizeChanger: true,

@@ -1,0 +1,133 @@
+import React from 'react';
+import { Select, Button } from 'antd';
+import { CloseOutlined } from '@ant-design/icons';
+import type { FilterType, FilterValue, DateFilterValue, AmountFilterValue, CategoryFilterValue } from './FilterBar';
+import DateFilterInput from './filters/DateFilterInput';
+import AmountFilterInput from './filters/AmountFilterInput';
+import EntityFilterInput from './filters/EntityFilterInput';
+import HierarchicalCategoryFilter from './filters/HierarchicalCategoryFilter';
+import './FilterBar.css';
+
+// Filter type labels
+const FILTER_TYPE_OPTIONS: { value: FilterType; label: string }[] = [
+    { value: 'date', label: '签订日期' },
+    { value: 'amount', label: '合同金额范围' },
+    { value: 'entity', label: '我方实体' },
+    { value: 'category', label: '客户分类' },
+];
+
+interface FilterRowProps {
+    id: string;
+    type: FilterType | null;
+    value: FilterValue;
+    onTypeChange: (id: string, type: FilterType | null) => void;
+    onValueChange: (id: string, value: FilterValue) => void;
+    onRemove: (id: string) => void;
+    usedTypes: FilterType[];
+    categoryHierarchy: Record<string, string[]>;
+    entityOptions: string[];
+    isLastRow: boolean;
+}
+
+const FilterRow: React.FC<FilterRowProps> = ({
+    id,
+    type,
+    value,
+    onTypeChange,
+    onValueChange,
+    onRemove,
+    usedTypes,
+    categoryHierarchy,
+    entityOptions,
+    isLastRow
+}) => {
+    // Filter out used types (except current type)
+    const availableTypeOptions = FILTER_TYPE_OPTIONS.filter(opt => {
+        if (opt.value === type) return true;
+        return !usedTypes.includes(opt.value);
+    });
+
+    // Render value input based on type
+    const renderValueInput = () => {
+        if (!type) {
+            return (
+                <Select
+                    placeholder="选择值"
+                    disabled
+                    className="filter-value-select"
+                    style={{ flex: 1 }}
+                />
+            );
+        }
+
+        switch (type) {
+            case 'date':
+                return (
+                    <DateFilterInput
+                        value={value as DateFilterValue}
+                        onChange={(newValue) => onValueChange(id, newValue)}
+                    />
+                );
+            case 'amount':
+                return (
+                    <AmountFilterInput
+                        value={value as AmountFilterValue}
+                        onChange={(newValue) => onValueChange(id, newValue)}
+                    />
+                );
+            case 'entity':
+                return (
+                    <EntityFilterInput
+                        value={value as string}
+                        options={entityOptions}
+                        onChange={(newValue) => onValueChange(id, newValue)}
+                    />
+                );
+            case 'category':
+                return (
+                    <HierarchicalCategoryFilter
+                        value={value as CategoryFilterValue || { level1: undefined, level2: [] }}
+                        categoryHierarchy={categoryHierarchy}
+                        onChange={(newValue) => onValueChange(id, newValue)}
+                    />
+                );
+
+            default:
+                return null;
+        }
+    };
+
+    return (
+        <div className={`filter-row ${isLastRow ? 'filter-row-empty' : ''}`}>
+            <Select
+                placeholder="选择筛选器"
+                value={type}
+                onChange={(newType) => onTypeChange(id, newType)}
+                options={availableTypeOptions}
+                className="filter-type-select"
+                allowClear
+                onClear={() => onTypeChange(id, null)}
+            />
+
+            <div className="filter-value-container">
+                {renderValueInput()}
+            </div>
+
+            {!isLastRow && (
+                <Button
+                    type="text"
+                    icon={<CloseOutlined />}
+                    onClick={() => onRemove(id)}
+                    className="filter-remove-button"
+                    aria-label="删除筛选条件"
+                />
+            )}
+
+            {isLastRow && (
+                <div className="filter-remove-placeholder" />
+            )}
+        </div>
+    );
+};
+
+export default FilterRow;

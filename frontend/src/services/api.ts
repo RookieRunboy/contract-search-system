@@ -215,6 +215,7 @@ export interface SearchFilters {
   ourEntity?: string | null;
   customerCategoryLevel1?: string[];
   customerCategoryLevel2?: string[];
+
 }
 
 export const searchDocuments = async (

@@ -1,6 +1,6 @@
 # contract-management 规范变更
 
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: 层级式客户分类筛选
 系统 **SHALL** 提供层级式客户分类筛选器，在单个筛选行内同时支持一级分类选择和对应二级分类的多选。
@@ -36,8 +36,3 @@
 - **WHEN** 用户点击筛选行的删除按钮或整体清除
 - **THEN** 该筛选条件从搜索查询中移除
 - **AND** 搜索结果不再受该筛选条件限制
-
-## REMOVED Requirements
-
-### ~~Requirement: 分离的一级/二级分类筛选器~~
-移除原先分离的"客户分类（一级）"和"客户分类（二级）"两个独立筛选器类型，替换为统一的层级选择器。

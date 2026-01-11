@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
 import type { FC } from 'react';
 import { Input, Button, Card, List, Space, Typography, Empty, Spin, message, Badge, Tag, Checkbox, Progress, Tooltip, Collapse } from 'antd';
-import { FileTextOutlined, ThunderboltOutlined, DownloadOutlined, CaretRightOutlined } from '@ant-design/icons';
-import { searchDocuments, downloadDocument, getCustomerCategories } from '../services/api';
+import { FileTextOutlined, ThunderboltOutlined, DownloadOutlined, CaretRightOutlined, SearchOutlined } from '@ant-design/icons';
+import { searchDocuments, downloadDocument, getCustomerCategories, smartParse } from '../services/api';
 import type { ContractSearchResult, ContractMetadata } from '../types/index';
-import type { SearchFilters } from '../services/api';
+import type { SearchFilters, SmartParseResult } from '../services/api';
 import MetadataEditModal from '../components/MetadataEditModal';
 import FilterBar from '../components/FilterBar';
 import dayjs from 'dayjs';
@@ -12,7 +12,6 @@ import '../styles/compact-date-picker.css';
 import { useAuth } from '../contexts/AuthContext';
 
 const { Title, Text } = Typography;
-const { Search } = Input;
 
 const CHINASOFT_ENTITY_NAMES = [
   '中软国际科技服务有限公司',
@@ -51,6 +50,72 @@ const SearchPage: FC = () => {
     };
     loadCategories();
   }, []);
+
+  // 转换智能解析的筛选条件
+  const convertSmartFilters = (filters: SmartParseResult['filters']): SearchFilters => {
+    const result: SearchFilters = {};
+    if (filters.date_start) result.dateStart = filters.date_start;
+    if (filters.date_end) result.dateEnd = filters.date_end;
+    if (filters.amount_min != null) result.amountMin = filters.amount_min;
+    if (filters.amount_max != null) result.amountMax = filters.amount_max;
+    if (filters.our_entity) result.ourEntity = filters.our_entity;
+    if (filters.customer_category_level1) result.customerCategoryLevel1 = [filters.customer_category_level1];
+    if (filters.customer_category_level2) result.customerCategoryLevel2 = [filters.customer_category_level2];
+    return result;
+  };
+
+  // 智能解析并搜索
+  const handleSmartSearch = async () => {
+    const trimmedQuery = searchQuery.trim();
+    if (!trimmedQuery) {
+      message.warning('请输入要智能解析的内容');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      // 1. 调用智能解析
+      const result = await smartParse(trimmedQuery);
+
+      // 2. 更新筛选条件
+      const newFilters = convertSmartFilters(result.filters);
+      // 合并当前已有的手动筛选条件（可选，或者覆盖？用户说"直接变成...对应的筛选条件"，可能意味着覆盖或增量）
+      // 这里选择增量更新，保留用户之前手动选的但AI没覆盖的？
+      // 或者更符合直觉的是：AI分析出的条件应用到FilterBar上。
+      setCurrentFilters(prev => ({ ...prev, ...newFilters }));
+
+      // 3. 更新搜索框关键词
+      const extractedKeywords = result.keywords.join(' ');
+
+      // 注意：如果提取出的关键词为空，可能意味着用户想看"所有符合条件的"，此时搜索框应该清空还是保留原话？
+      // 用户说"把框里的词变成对应的关键词"。
+      setSearchQuery(extractedKeywords);
+
+      // 4. 触发搜索
+      // 使用提取出的关键词和新的筛选条件进行搜索
+      const topK = 99;
+      // 注意: searchDocuments 使用的 filters 参数应该是合并后的
+      const searchToRun = extractedKeywords; // 如果为空字符串，后端会作为 query_content="" 处理
+
+      // 由于 react state 更新是异步的，我们需要用计算出的值直接调用
+      const mergedFilters = { ...currentFilters, ...newFilters };
+
+      const searchResults = await searchDocuments(searchToRun, topK, mergedFilters);
+      setSearchResults(searchResults);
+
+      if (searchResults.length === 0) {
+        message.info('未找到相关文档');
+      } else {
+        message.success(`智能解析完成，已找到 ${searchResults.length} 篇文档`);
+      }
+
+    } catch (error) {
+      console.error('智能搜索失败:', error);
+      message.error('智能解析失败，请稍后重试');
+    } finally {
+      setLoading(false);
+    }
+  };
 
 
   const handleSearch = async () => {
@@ -474,25 +539,42 @@ const SearchPage: FC = () => {
           </div>
 
           <div className="search-input-container">
-            <Search
-              placeholder="请输入搜索关键词，如：合同条款、责任义务、付款方式等..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onSearch={handleSearch}
-              enterButton={
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <Input
+                placeholder="请输入搜索内容..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onPressEnter={handleSearch}
+                size="large"
+                className="search-input"
+                style={{ flex: 1 }}
+              />
+              <Button
+                type="primary"
+                icon={<SearchOutlined />}
+                size="large"
+                onClick={handleSearch}
+                loading={loading}
+              >
+                普通搜索
+              </Button>
+              <Tooltip title="AI会自动提取关键词并设置筛选条件">
                 <Button
-                  type="primary"
+                  className="smart-search-btn"
                   icon={<ThunderboltOutlined />}
                   size="large"
-                  className="search-button"
+                  onClick={handleSmartSearch}
+                  loading={loading}
+                  style={{
+                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                    borderColor: 'transparent',
+                    color: 'white'
+                  }}
                 >
                   智能搜索
                 </Button>
-              }
-              size="large"
-              loading={loading}
-              className="search-input"
-            />
+              </Tooltip>
+            </div>
           </div>
 
 

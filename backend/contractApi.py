@@ -799,11 +799,11 @@ def _extract_codes_from_filename(filename: str) -> Dict[str, Optional[str]]:
         return 'unknown'
     
     def assign_code(code: str) -> None:
-        """根据编码类型分配到结果中"""
+        """根据编码类型分配到结果中（第一个匹配的优先）"""
         code_type = classify_code(code)
-        if code_type == 'cir':
+        if code_type == 'cir' and result["cir_code"] is None:
             result["cir_code"] = code
-        elif code_type == 'contract':
+        elif code_type == 'contract' and result["contract_code"] is None:
             result["contract_code"] = code
     
     # 模式A: 方括号格式 [Code1]-[Code2]Name
@@ -822,18 +822,19 @@ def _extract_codes_from_filename(filename: str) -> Dict[str, Optional[str]]:
         return result
     
     # 模式C: 无方括号格式 - 用连字符分隔，如 C500000241118010-CIR500000241118020-合同名
-    # 按连字符分割，检查前几个部分是否为编码
+    # 扫描所有片段以识别编码（编码可位于文件名任意位置）
     parts = base_name.split('-')
-    if len(parts) >= 2:
-        # 检查前两个部分
-        for part in parts[:2]:
-            part_stripped = part.strip()
-            if part_stripped:
-                assign_code(part_stripped)
-        
-        # 如果找到了任何编码，直接返回
-        if result["contract_code"] is not None or result["cir_code"] is not None:
-            return result
+    for part in parts:
+        part_stripped = part.strip()
+        if part_stripped:
+            assign_code(part_stripped)
+        # 如果两种编码都已找到，可以提前结束
+        if result["contract_code"] is not None and result["cir_code"] is not None:
+            break
+    
+    # 如果找到了任何编码，则返回
+    if result["contract_code"] is not None or result["cir_code"] is not None:
+        return result
     
     # 模式D: 无编码
     return result
@@ -1621,6 +1622,104 @@ async def search_alias(
         metadata_weight=metadata_weight,
         fuzziness=fuzziness,
     )
+
+
+# ========== 智能解析接口 ==========
+class SmartParseRequest(BaseModel):
+    """智能解析请求模型"""
+    text: str = Field(..., min_length=1, max_length=5000, description="需要解析的自然语言查询文本")
+
+
+@app.post("/smart-parse")
+async def smart_parse_query(
+    request: SmartParseRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """
+    智能解析自然语言查询
+
+    将用户输入的自然语言文本解析为结构化的搜索参数，包括：
+    - keywords: 搜索关键词列表
+    - filters: 筛选条件对象（包含日期、金额、分类等）
+
+    请求体:
+        {
+            "text": "请查找去年签订的金额大于500万且客户是电信部门的关于光缆采购的合同"
+        }
+
+    响应:
+        {
+            "code": 200,
+            "message": "解析成功",
+            "data": {
+                "keywords": ["光缆采购"],
+                "filters": {
+                    "date_start": "2024-01-01",
+                    "date_end": "2024-12-31",
+                    "amount_min": 5000000,
+                    "amount_max": null,
+                    "our_entity": null,
+                    "customer_category_level1": "电信",
+                    "customer_category_level2": null
+                }
+            }
+        }
+    """
+    try:
+        from smart_query_parser import get_smart_query_parser
+
+        parser = get_smart_query_parser()
+        result = await run_in_threadpool(parser.parse, request.text)
+
+        if result.get("success"):
+            return {
+                "code": 200,
+                "message": "解析成功",
+                "data": {
+                    "keywords": result.get("keywords", []),
+                    "filters": result.get("filters", {})
+                }
+            }
+        else:
+            return {
+                "code": 500,
+                "message": f"解析失败: {result.get('error', '未知错误')}",
+                "data": {
+                    "keywords": [],
+                    "filters": {}
+                }
+            }
+
+    except ImportError as e:
+        return {
+            "code": 500,
+            "message": f"智能解析模块未加载: {str(e)}",
+            "data": {
+                "keywords": [],
+                "filters": {}
+            }
+        }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {
+            "code": 500,
+            "message": f"解析异常: {str(e)}",
+            "data": {
+                "keywords": [],
+                "filters": {}
+            }
+        }
+
+
+# API 别名：兼容前端调用路径
+@app.post("/api/smart-parse")
+async def smart_parse_query_alias(
+    request: SmartParseRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """智能解析接口别名（兼容 /api/smart-parse 路径）"""
+    return await smart_parse_query(request, current_user)
 
 
 # 系统信息接口

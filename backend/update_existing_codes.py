@@ -59,10 +59,11 @@ def _extract_codes_from_filename(filename: str) -> Dict[str, Optional[str]]:
         return 'unknown'
     
     def assign_code(code: str) -> None:
+        """根据编码类型分配到结果中（第一个匹配的优先）"""
         code_type = classify_code(code)
-        if code_type == 'cir':
+        if code_type == 'cir' and result["cir_code"] is None:
             result["cir_code"] = code
-        elif code_type == 'contract':
+        elif code_type == 'contract' and result["contract_code"] is None:
             result["contract_code"] = code
     
     # 模式A: 方括号格式 [Code1]-[Code2]Name
@@ -81,15 +82,19 @@ def _extract_codes_from_filename(filename: str) -> Dict[str, Optional[str]]:
         return result
     
     # 模式C: 无方括号格式 - 用连字符分隔
+    # 扫描所有片段以识别编码（编码可位于文件名任意位置）
     parts = base_name.split('-')
-    if len(parts) >= 2:
-        for part in parts[:2]:
-            part_stripped = part.strip()
-            if part_stripped:
-                assign_code(part_stripped)
-        
-        if result["contract_code"] is not None or result["cir_code"] is not None:
-            return result
+    for part in parts:
+        part_stripped = part.strip()
+        if part_stripped:
+            assign_code(part_stripped)
+        # 如果两种编码都已找到，可以提前结束
+        if result["contract_code"] is not None and result["cir_code"] is not None:
+            break
+    
+    # 如果找到了任何编码，则返回
+    if result["contract_code"] is not None or result["cir_code"] is not None:
+        return result
     
     return result
 

@@ -450,4 +450,46 @@ export const retryUpload = async (uploadId: string): Promise<any> => {
   }
 };
 
+// ========== 智能解析接口 ==========
+
+export interface SmartParseResult {
+  keywords: string[];
+  filters: {
+    date_start?: string | null;
+    date_end?: string | null;
+    amount_min?: number | null;
+    amount_max?: number | null;
+    our_entity?: string | null;
+    customer_category_level1?: string | null;
+    customer_category_level2?: string | null;
+  };
+}
+
+/**
+ * 智能解析自然语言查询
+ * 将用户输入的自然语言文本解析为结构化的搜索参数
+ * @param text 需要解析的自然语言查询文本
+ * @returns 解析后的搜索参数（包含 keywords 和 filters）
+ */
+export const smartParse = async (text: string): Promise<SmartParseResult> => {
+  try {
+    const response: any = await api.post('/smart-parse', { text });
+
+    if (response?.code === 200 && response?.data) {
+      return {
+        keywords: response.data.keywords || [],
+        filters: response.data.filters || {}
+      };
+    }
+
+    // 返回空结果
+    console.warn('智能解析返回异常:', response);
+    return { keywords: [], filters: {} };
+
+  } catch (error: any) {
+    console.error('智能解析API调用失败:', error);
+    throw new Error(error.response?.data?.message || error.message || '智能解析失败');
+  }
+};
+
 export default api;

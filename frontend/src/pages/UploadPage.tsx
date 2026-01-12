@@ -35,7 +35,7 @@ import {
   CloudUploadOutlined,
   InfoCircleOutlined,
 } from '@ant-design/icons';
-import { API_BASE_URL, deleteDocument, getUploadedDocuments, getDocumentDetail, downloadDocument, getUploadQueueStatus, retryUpload } from '../services/api';
+import { API_BASE_URL, deleteDocument, batchDeleteDocuments, getUploadedDocuments, getDocumentDetail, downloadDocument, getUploadQueueStatus, retryUpload } from '../services/api';
 import MetadataEditModal from '../components/MetadataEditModal';
 import ProgressStepper from '../components/ProgressStepper';
 import type { ContractMetadata, UploadQueueStatus } from '../types';
@@ -309,6 +309,10 @@ const UploadPage: FC = () => {
   const [downloadingKey, setDownloadingKey] = useState<string | null>(null);
   const [retryLoadingKey, setRetryLoadingKey] = useState<string | null>(null);
 
+  // 批量选择状态
+  const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
+  const [batchDeleteLoading, setBatchDeleteLoading] = useState(false);
+
   // 队列状态
   const [queueStatus, setQueueStatus] = useState<UploadQueueStatus | null>(null);
 
@@ -486,6 +490,45 @@ const UploadPage: FC = () => {
       message.error(error instanceof Error ? error.message : '删除失败');
     } finally {
       setDeleteLoadingKey((current) => (current === contractKey ? null : current));
+    }
+  };
+
+  // 批量删除文档
+  const handleBatchDelete = async () => {
+    if (selectedRowKeys.length === 0) {
+      message.warning('请先选择要删除的合同');
+      return;
+    }
+
+    setBatchDeleteLoading(true);
+    try {
+      // 获取选中的文件名列表
+      const filenames = selectedRowKeys.map((key) => {
+        const doc = documents.find((d) => d.contractKey === key);
+        return doc?.fileName ?? `${key}.pdf`;
+      });
+
+      const result = await batchDeleteDocuments(filenames);
+
+      // 显示结果消息
+      if (result.success_count > 0) {
+        message.success(`成功删除 ${result.success_count} 个合同`);
+      }
+      if (result.failed_count > 0) {
+        const failedNames = result.failed.map((f) => f.filename).join(', ');
+        message.warning(`${result.failed_count} 个合同删除失败: ${failedNames}`);
+      }
+
+      // 清空选择
+      setSelectedRowKeys([]);
+
+      // 刷新列表
+      await fetchDocuments();
+    } catch (error) {
+      console.error('批量删除失败:', error);
+      message.error(error instanceof Error ? error.message : '批量删除失败');
+    } finally {
+      setBatchDeleteLoading(false);
     }
   };
 
@@ -1126,8 +1169,33 @@ const UploadPage: FC = () => {
       {/* 文档列表 */}
       <Card>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-          <Title level={4}>📋 合同列表</Title>
           <Space>
+            <Title level={4} style={{ margin: 0 }}>📋 合同列表</Title>
+            {selectedRowKeys.length > 0 && (
+              <Text type="secondary">
+                已选择 {selectedRowKeys.length} 项
+              </Text>
+            )}
+          </Space>
+          <Space>
+            {selectedRowKeys.length > 0 && (
+              <Popconfirm
+                title="确定批量删除选中的合同吗？"
+                description={`即将删除 ${selectedRowKeys.length} 个合同，此操作不可撤销。`}
+                okText="确定删除"
+                cancelText="取消"
+                okButtonProps={{ danger: true, loading: batchDeleteLoading }}
+                onConfirm={handleBatchDelete}
+              >
+                <Button
+                  danger
+                  icon={<DeleteOutlined />}
+                  loading={batchDeleteLoading}
+                >
+                  批量删除
+                </Button>
+              </Popconfirm>
+            )}
             <Button
               icon={<ReloadOutlined />}
               onClick={() => {
@@ -1146,6 +1214,11 @@ const UploadPage: FC = () => {
           rowKey="contractKey"
           loading={loading}
           scroll={{ x: 1100 }}
+          rowSelection={{
+            selectedRowKeys,
+            onChange: (keys) => setSelectedRowKeys(keys),
+            preserveSelectedRowKeys: true,
+          }}
           pagination={{
             pageSize: 10,
             showSizeChanger: true,

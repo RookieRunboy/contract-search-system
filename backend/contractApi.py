@@ -193,6 +193,11 @@ class UpdateRoleRequest(BaseModel):
 class UpdateStatusRequest(BaseModel):
     status: str = Field(..., description="新状态: active, disabled")
 
+
+class BatchDeleteRequest(BaseModel):
+    """批量删除请求模型"""
+    filenames: List[str] = Field(..., description="要删除的文件名列表", min_length=1, max_length=100)
+
 def _create_access_token(user_id: str, role: str, expires_minutes: Optional[int] = None) -> str:
     lifetime = expires_minutes or ACCESS_TOKEN_EXPIRE_MINUTES
     expire = datetime.utcnow() + timedelta(minutes=lifetime)
@@ -1435,6 +1440,73 @@ async def delete_by_filename(
             "message": f"文档删除异常: {str(e)}",
             "data": None
         }
+
+
+@app.post("/document/delete/batch")
+async def batch_delete_documents(
+    request: BatchDeleteRequest,
+    current_user: Dict[str, Any] = Depends(require_admin),
+):
+    """
+    批量删除文档
+
+    请求体：
+        {
+            "filenames": ["contract1.pdf", "contract2.pdf"]
+        }
+
+    响应：
+        {
+            "code": 200,
+            "message": "批量删除完成",
+            "data": {
+                "success": ["contract1.pdf"],
+                "failed": [{"filename": "contract2.pdf", "error": "File not found"}],
+                "total": 2,
+                "success_count": 1,
+                "failed_count": 1
+            }
+        }
+    """
+    success_list: List[str] = []
+    failed_list: List[Dict[str, str]] = []
+
+    for filename in request.filenames:
+        try:
+            result = await run_in_threadpool(es_deleter.delete_by_filename, filename)
+            
+            if result.get('status') == 'success':
+                # 同步清理状态记录
+                try:
+                    normalized = result.get('normalized_filename') or filename
+                    status_manager.remove_records_for_contract(normalized)
+                except Exception as cleanup_exc:
+                    print(f"WARNING: 批量删除-清理状态记录失败 {filename}: {cleanup_exc}")
+                
+                success_list.append(filename)
+            else:
+                failed_list.append({
+                    "filename": filename,
+                    "error": result.get('message') or "删除失败"
+                })
+        except Exception as e:
+            failed_list.append({
+                "filename": filename,
+                "error": str(e)
+            })
+
+    return {
+        "code": 200,
+        "message": "批量删除完成",
+        "data": {
+            "success": success_list,
+            "failed": failed_list,
+            "total": len(request.filenames),
+            "success_count": len(success_list),
+            "failed_count": len(failed_list)
+        }
+    }
+
 
 @app.get("/document/search")
 async def search_documents(

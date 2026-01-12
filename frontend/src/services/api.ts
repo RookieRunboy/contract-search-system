@@ -344,6 +344,29 @@ export const deleteDocument = async (documentName: string): Promise<any> => {
   }
 };
 
+// 批量删除文档响应类型
+export interface BatchDeleteResult {
+  success: string[];
+  failed: Array<{ filename: string; error: string }>;
+  total: number;
+  success_count: number;
+  failed_count: number;
+}
+
+// 批量删除文档
+export const batchDeleteDocuments = async (filenames: string[]): Promise<BatchDeleteResult> => {
+  try {
+    const response: any = await api.post('/document/delete/batch', { filenames });
+    if (response?.data) {
+      return response.data as BatchDeleteResult;
+    }
+    // 兼容直接返回data的情况
+    return response as BatchDeleteResult;
+  } catch (error: any) {
+    throw new Error(error.response?.data?.detail || error.message || '批量删除失败');
+  }
+};
+
 // 清空所有文档
 export const clearAllDocuments = async (): Promise<any> => {
   try {

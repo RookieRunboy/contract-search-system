@@ -94,6 +94,7 @@ interface FilterRowState {
   id: string;                    // 唯一标识（uuid）
   type: FilterType | null;       // 筛选类型，null 表示未选择
   value: FilterValue;            // 筛选值
+  isAiGenerated?: boolean;       // 是否为AI生成的筛选条件
 }
 
 type FilterValue =
@@ -128,12 +129,20 @@ SearchPage.tsx
 ## Styling Guidelines
 
 ### Color Palette
-- **Row Background**: `#f8f9fa`（浅灰）或 `#1a1a2e`（深色主题）
-- **Type Selector Background**: `#2d2d44`（深蓝灰）
-- **Type Selector Text**: `#ffffff`（白色）
-- **Value Input Background**: `#ffffff`（白色）
-- **Value Input Border**: `#d9d9d9`（灰色）
-- **Remove Button**: `#666666`（灰色），hover 时 `#ff4d4f`（红色）
+- **Row Background**: `rgba(255, 255, 255, 0.6)` (Semi-transparent white) with `backdrop-filter: blur(8px)`
+- **Type Selector**:
+    - Background: `#ffffff` (White)
+    - Border: `1px solid rgba(102, 126, 234, 0.2)`
+    - Text: `#1f2937` (Dark Gray)
+- **Value Input**:
+    - Background: `#ffffff` (White)
+    - Border: `1px solid rgba(102, 126, 234, 0.2)`
+- **Remove Button**: `#9ca3af` (Gray), hover `#ef4444` (Red)
+- **Active Accents**: `#667eea` (Primary Purple/Blue) for focus states and borders
+- **AI Generated Highlight**:
+    - Border: `2px solid #a78bfa` (Light Purple) or Gradient Border
+    - Box Shadow: `0 0 8px rgba(167, 139, 250, 0.4)`
+
 
 ### Spacing
 - **Row Gap**: `8px`

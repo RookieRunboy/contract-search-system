@@ -483,8 +483,8 @@ export interface SmartParseResult {
     amount_min?: number | null;
     amount_max?: number | null;
     our_entity?: string | null;
-    customer_category_level1?: string | null;
-    customer_category_level2?: string | null;
+    customer_category_level1?: string[] | null;
+    customer_category_level2?: string[] | null;
   };
 }
 

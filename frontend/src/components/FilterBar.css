@@ -3,9 +3,10 @@
 .filter-bar {
   margin-top: 12px;
   padding: 16px;
-  background: #f8f9fa;
-  border-radius: 8px;
-  border: 1px solid #e9ecef;
+  background: rgba(255, 255, 255, 0.4);
+  backdrop-filter: blur(8px);
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
 }
 
 .filter-bar-rows {
@@ -19,28 +20,58 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 8px 12px;
-  background: #ffffff;
-  border-radius: 6px;
-  border: 1px solid #e0e0e0;
+  padding: 12px 16px;
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(4px);
+  border-radius: 12px;
+  border: 1px solid rgba(102, 126, 234, 0.15);
   transition: all 0.2s ease;
 }
 
 .filter-row:hover {
   border-color: #667eea;
-  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.1);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.1);
+  background: rgba(255, 255, 255, 0.9);
 }
 
 .filter-row-empty {
-  background: #fafafa;
-  border-style: dashed;
+  background: rgba(255, 255, 255, 0.3);
+  border: 1px dashed rgba(102, 126, 234, 0.3);
 }
 
 .filter-row-empty:hover {
-  background: #ffffff;
+  background: rgba(255, 255, 255, 0.6);
+  border-color: #667eea;
 }
 
-/* Filter Type Selector - Intel dark style */
+/* AI Generated Filter Row - Purple highlight */
+.filter-row-ai {
+  border: 2px solid #a78bfa;
+  box-shadow: 0 0 8px rgba(167, 139, 250, 0.4);
+  background: rgba(167, 139, 250, 0.08);
+  position: relative;
+}
+
+.filter-row-ai::before {
+  content: '✨ AI';
+  position: absolute;
+  top: -8px;
+  left: 12px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+  letter-spacing: 0.5px;
+}
+
+.filter-row-ai:hover {
+  border-color: #8b5cf6;
+  box-shadow: 0 0 12px rgba(167, 139, 250, 0.5);
+}
+
+/* Filter Type Selector - Clean light style */
 .filter-type-select {
   min-width: 160px;
   width: 160px;
@@ -48,27 +79,28 @@
 }
 
 .filter-type-select .ant-select-selector {
-  background: #1a1a2e !important;
-  border-color: #1a1a2e !important;
-  color: #ffffff !important;
-  border-radius: 4px;
+  background: #ffffff !important;
+  border-color: rgba(102, 126, 234, 0.2) !important;
+  color: #1f2937 !important;
+  border-radius: 8px !important;
 }
 
 .filter-type-select .ant-select-selection-placeholder {
-  color: rgba(255, 255, 255, 0.6) !important;
+  color: #9ca3af !important;
 }
 
 .filter-type-select .ant-select-selection-item {
-  color: #ffffff !important;
+  color: #1f2937 !important;
+  font-weight: 500;
 }
 
 .filter-type-select .ant-select-arrow {
-  color: rgba(255, 255, 255, 0.8) !important;
+  color: #6b7280 !important;
 }
 
 .filter-type-select .ant-select-clear {
-  background: #1a1a2e !important;
-  color: rgba(255, 255, 255, 0.8) !important;
+  background: #ffffff !important;
+  color: #9ca3af !important;
 }
 
 .filter-type-select:hover .ant-select-selector {
@@ -77,7 +109,7 @@
 
 .filter-type-select.ant-select-focused .ant-select-selector {
   border-color: #667eea !important;
-  box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2) !important;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1) !important;
 }
 
 /* Filter Value Container */

@@ -127,9 +127,43 @@
 
 ---
 
-## 实现完成总结
 
-完成日期: 2025-12-30
+---
+
+## Phase 6: AI 集成与优化 (新增)
+
+- [x] **Task 6.1: FilterBar 支持外部筛选注入**
+  - **文件**: `frontend/src/components/FilterBar.tsx`
+  - **内容**:
+    - 添加 `externalFilters` prop 或 `useImperativeHandle` 方法
+    - 实现将外部 `SearchFilters` 对象转换为 `FilterRowState` 的逻辑
+    - 标记这些转换为 `isAiGenerated: true`
+  - **验证**: 通过 props 注入外部筛选条件并正确转换为 FilterRowState ✓
+
+- [x] **Task 6.2: 搜索页 Smart Search 联动**
+  - **文件**: `frontend/src/pages/SearchPage.tsx`
+  - **内容**:
+    - 在 `handleSmartSearch` 中，不仅触发搜索，还将解析结果传递给 `FilterBar`
+    - 确保 `FilterBar` UI 更新以反映 AI 解析出的条件
+  - **验证**: 智能搜索后 FilterBar 自动显示 AI 解析的筛选条件 ✓
+
+- [x] **Task 6.3: 实现 AI 筛选器视觉区分**
+  - **文件**: `frontend/src/components/FilterRow.tsx`, `FilterBar.css`
+  - **内容**:
+    - 在 `FilterRow` 中接收 `isAiGenerated` 属性
+    - 添加 CSS 样式：紫色边框/光晕效果 (`border: 2px solid #a78bfa`)
+    - 确保视觉上与手动添加的行有明显区分
+  - **验证**: AI 生成的筛选行显示紫色边框和 "✨ AI" 标签 ✓
+
+- [x] **Task 6.4: 处理 AI 筛选器的用户交互**
+  - **文件**: `frontend/src/components/FilterBar.tsx`
+  - **内容**:
+    - 当用户修改 AI 生成的行时，自动移除 `isAiGenerated` 标记（变为普通行）
+    - 确保交互逻辑自然流畅
+  - **验证**: 用户编辑 AI 行后，紫色样式消失变为普通行 ✓
+
+
+完成日期: 2026-01-14
 
 ### 创建的文件
 1. `frontend/src/components/FilterBar.tsx` - 主筛选器栏组件

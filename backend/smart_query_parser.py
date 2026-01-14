@@ -135,7 +135,7 @@ class SmartQueryParser:
 1. 我方实体 (our_entity): 只能从以下列表中选择
 {entity_list}
 
-2. 客户分类 (customer_category): 按照以下层级结构
+2. 客户分类 (customer_category): 按照以下层级结构 (支持多选)
 {category_text}
 
 3. 金额范围 (amount): 支持最小值和最大值
@@ -159,6 +159,7 @@ class SmartQueryParser:
 3. 金额单位请统一转换为人民币元（万=10000）
 4. 如果无法确定某个筛选条件，请将该字段设为 null
 5. 关键词应提取用户描述中与合同内容相关的核心词汇
+6. 客户分类字段 (customer_category_level1/2) 应返回字符串数组，支持多选。
 
 **Few-Shot 示例**:
 
@@ -173,8 +174,8 @@ class SmartQueryParser:
     "amount_min": 5000000,
     "amount_max": null,
     "our_entity": null,
-    "customer_category_level1": "电信",
-    "customer_category_level2": null
+    "customer_category_level1": ["电信"],
+    "customer_category_level2": []
   }}
 }}
 
@@ -189,8 +190,8 @@ class SmartQueryParser:
     "amount_min": null,
     "amount_max": null,
     "our_entity": null,
-    "customer_category_level1": null,
-    "customer_category_level2": null
+    "customer_category_level1": [],
+    "customer_category_level2": []
   }}
 }}
 
@@ -205,8 +206,8 @@ class SmartQueryParser:
     "amount_min": 10000000,
     "amount_max": null,
     "our_entity": null,
-    "customer_category_level1": null,
-    "customer_category_level2": null
+    "customer_category_level1": [],
+    "customer_category_level2": []
   }}
 }}
 
@@ -221,8 +222,24 @@ class SmartQueryParser:
     "amount_min": null,
     "amount_max": null,
     "our_entity": "中软国际科技服务有限公司",
-    "customer_category_level1": "金融",
-    "customer_category_level2": "银行"
+    "customer_category_level1": ["金融"],
+    "customer_category_level2": ["银行"]
+  }}
+}}
+
+示例5:
+用户输入: "查找国有行和股份制银行的合同"
+输出:
+{{
+  "keywords": [],
+  "filters": {{
+    "date_start": null,
+    "date_end": null,
+    "amount_min": null,
+    "amount_max": null,
+    "our_entity": null,
+    "customer_category_level1": ["银行"],
+    "customer_category_level2": ["国有行", "全国股份制银行"]
   }}
 }}
 
@@ -241,8 +258,8 @@ class SmartQueryParser:
     "amount_min": 数字或null,
     "amount_max": 数字或null,
     "our_entity": "实体名称或null",
-    "customer_category_level1": "一级分类或null",
-    "customer_category_level2": "二级分类或null"
+    "customer_category_level1": ["一级分类1", "一级分类2"],
+    "customer_category_level2": ["二级分类1", "二级分类2"]
   }}
 }}
 
@@ -403,8 +420,8 @@ class SmartQueryParser:
                 "amount_min": None,
                 "amount_max": None,
                 "our_entity": None,
-                "customer_category_level1": None,
-                "customer_category_level2": None
+                "customer_category_level1": [],
+                "customer_category_level2": []
             }
         }
         
@@ -464,35 +481,85 @@ class SmartQueryParser:
                             result["filters"]["our_entity"] = entity
                             break
             
-            # 客户分类
+            # 客户分类 (支持列表)
             level1 = filters.get("customer_category_level1")
-            if level1 and str(level1).lower() != "null":
-                level1_str = str(level1).strip()
-                # 验证是否在允许的一级分类中
-                if level1_str in self.category_hierarchy:
-                    result["filters"]["customer_category_level1"] = level1_str
-                else:
-                    # 尝试模糊匹配
-                    for cat in self.category_hierarchy.keys():
-                        if level1_str in cat or cat in level1_str:
-                            result["filters"]["customer_category_level1"] = cat
-                            break
-            
-            level2 = filters.get("customer_category_level2")
-            if level2 and str(level2).lower() != "null":
-                level2_str = str(level2).strip()
-                # 如果有一级分类，验证二级分类是否匹配
-                parent_level1 = result["filters"]["customer_category_level1"]
-                if parent_level1 and parent_level1 in self.category_hierarchy:
-                    allowed_level2 = self.category_hierarchy[parent_level1]
-                    if level2_str in allowed_level2:
-                        result["filters"]["customer_category_level2"] = level2_str
+            level1_list = []
+            if level1:
+                # 统一转为列表
+                if isinstance(level1, str):
+                    if level1.lower() != "null":
+                        level1 = [level1]
                     else:
-                        # 尝试模糊匹配
-                        for l2 in allowed_level2:
-                            if level2_str in l2 or l2 in level2_str:
-                                result["filters"]["customer_category_level2"] = l2
-                                break
+                        level1 = []
+                
+                if isinstance(level1, list):
+                    for item in level1:
+                        if not item or str(item).lower() == "null":
+                            continue
+                        item_str = str(item).strip()
+                        # 验证是否在允许的一级分类中
+                        if item_str in self.category_hierarchy:
+                            level1_list.append(item_str)
+                        else:
+                            # 尝试模糊匹配
+                            for cat in self.category_hierarchy.keys():
+                                if item_str in cat or cat in item_str:
+                                    level1_list.append(cat)
+                                    break
+            
+            if level1_list:
+                 result["filters"]["customer_category_level1"] = list(set(level1_list))
+            
+            # 二级分类
+            level2 = filters.get("customer_category_level2")
+            level2_list = []
+            if level2:
+                # 统一转为列表
+                if isinstance(level2, str):
+                    if level2.lower() != "null":
+                        level2 = [level2]
+                    else:
+                        level2 = []
+                
+                if isinstance(level2, list):
+                    for item in level2:
+                        if not item or str(item).lower() == "null":
+                            continue
+                        item_str = str(item).strip()
+                        
+                        # 验证二级分类是否匹配 (需在一级分类覆盖的范围内)
+                        # 如果没有选中一级分类，或者选中了多个一级分类，我们只要该二级分类存在于任何一个已选一级分类下即可
+                        # 如果没有选任何一级分类，则检查全局二级分类
+                        
+                        valid = False
+                        matched_cat = None
+                        
+                        allowed_cats = []
+                        current_l1 = result["filters"]["customer_category_level1"]
+                        if current_l1:
+                             for l1 in current_l1:
+                                 allowed_cats.extend(self.category_hierarchy.get(l1, []))
+                        else:
+                            # 没选一级，允许所有存在的二级
+                            for sublist in self.category_hierarchy.values():
+                                allowed_cats.extend(sublist)
+                        
+                        if item_str in allowed_cats:
+                            valid = True
+                            matched_cat = item_str
+                        else:
+                            # 模糊匹配
+                             for allowed in allowed_cats:
+                                if item_str in allowed or allowed in item_str:
+                                    valid = True
+                                    matched_cat = allowed
+                                    break
+                        
+                        if valid and matched_cat:
+                            level2_list.append(matched_cat)
+
+            if level2_list:
+                result["filters"]["customer_category_level2"] = list(set(level2_list))
         
         return result
     

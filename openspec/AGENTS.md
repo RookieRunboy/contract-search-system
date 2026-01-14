@@ -63,6 +63,9 @@ After deployment, create separate PR to:
 - Use `openspec archive <change-id> --skip-specs --yes` for tooling-only changes (always pass the change ID explicitly)
 - Run `openspec validate --strict` to confirm the archived change passes checks
 
+### Global Rules
+- **Documentation Language**: All OpenSpec documents (proposals, specs, tasks, designs) MUST be written in **Chinese (Simplified)** unless explicitly requested otherwise by the user. This applies to all future sessions without reminders.
+
 ## Before Any Task
 
 **Context Checklist:**

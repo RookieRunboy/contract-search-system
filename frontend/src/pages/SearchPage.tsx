@@ -41,6 +41,8 @@ const SearchPage: FC = () => {
   const [categoryHierarchy, setCategoryHierarchy] = useState<Record<string, string[]>>({});
   // New filter state managed by FilterBar
   const [currentFilters, setCurrentFilters] = useState<SearchFilters>({});
+  // AI-generated filters from Smart Search (passed to FilterBar for visual distinction)
+  const [aiFilters, setAiFilters] = useState<SearchFilters | undefined>(undefined);
 
   // Load customer categories on mount
   useEffect(() => {
@@ -59,8 +61,8 @@ const SearchPage: FC = () => {
     if (filters.amount_min != null) result.amountMin = filters.amount_min;
     if (filters.amount_max != null) result.amountMax = filters.amount_max;
     if (filters.our_entity) result.ourEntity = filters.our_entity;
-    if (filters.customer_category_level1) result.customerCategoryLevel1 = [filters.customer_category_level1];
-    if (filters.customer_category_level2) result.customerCategoryLevel2 = [filters.customer_category_level2];
+    if (filters.customer_category_level1 && filters.customer_category_level1.length > 0) result.customerCategoryLevel1 = filters.customer_category_level1;
+    if (filters.customer_category_level2 && filters.customer_category_level2.length > 0) result.customerCategoryLevel2 = filters.customer_category_level2;
     return result;
   };
 
@@ -79,9 +81,10 @@ const SearchPage: FC = () => {
 
       // 2. 更新筛选条件
       const newFilters = convertSmartFilters(result.filters);
-      // 合并当前已有的手动筛选条件（可选，或者覆盖？用户说"直接变成...对应的筛选条件"，可能意味着覆盖或增量）
-      // 这里选择增量更新，保留用户之前手动选的但AI没覆盖的？
-      // 或者更符合直觉的是：AI分析出的条件应用到FilterBar上。
+      // Set AI filters to pass to FilterBar for visual distinction
+      // This will be consumed by FilterBar to show purple AI indicators
+      setAiFilters(newFilters);
+      // Also update currentFilters directly
       setCurrentFilters(prev => ({ ...prev, ...newFilters }));
 
       // 3. 更新搜索框关键词
@@ -584,6 +587,7 @@ const SearchPage: FC = () => {
               categoryHierarchy={categoryHierarchy}
               entityOptions={CHINASOFT_ENTITY_NAMES}
               onFiltersChange={setCurrentFilters}
+              externalFilters={aiFilters}
             />
           </div>
         </div>

@@ -115,8 +115,7 @@ th,
 .ant-layout-sider {
   background: linear-gradient(180deg, #1e3c72 0%, #2a5298 100%) !important;
   box-shadow: 2px 0 12px rgba(0, 0, 0, 0.15);
-  border-radius: 0 16px 16px 0;
-  margin: 8px 0 8px 8px;
+  margin: 0;
 }
 
 
@@ -643,7 +642,7 @@ th,
     padding: 20px;
     margin: 12px;
   }
-  
+
   .search-container {
     padding: 24px;
   }
@@ -655,16 +654,16 @@ th,
     margin: 8px 12px 0 8px;
     border-radius: 14px;
   }
-  
+
   .ant-layout-content {
     padding: 18px;
     margin: 10px;
   }
-  
+
   .search-input-container {
     max-width: 600px;
   }
-  
+
   .result-title-container {
     flex-wrap: wrap;
   }
@@ -677,12 +676,12 @@ th,
     border-radius: 12px;
     font-size: 14px;
   }
-  
+
   .ant-layout-content {
     padding: 16px;
     margin: 8px;
   }
-  
+
   .ant-layout-sider {
     position: fixed !important;
     height: 100vh;
@@ -693,29 +692,29 @@ th,
     min-width: 200px !important;
     max-width: 200px !important;
   }
-  
+
   .ant-card {
     border-radius: 12px !important;
     margin-bottom: 16px !important;
   }
-  
+
   .upload-dragger {
     border-radius: 16px !important;
   }
-  
+
   .ant-btn {
     border-radius: 8px !important;
   }
-  
+
   .ant-input {
     border-radius: 8px !important;
     font-size: 14px !important;
   }
-  
+
   .search-input-container {
     max-width: 100%;
   }
-  
+
   .slider-container {
     max-width: 100%;
     margin-top: 16px;
@@ -729,55 +728,55 @@ th,
     border-radius: 10px;
     font-size: 12px;
   }
-  
+
   .ant-layout-content {
     padding: 12px;
     margin: 6px;
   }
-  
+
   .ant-layout-sider {
     width: 180px !important;
     min-width: 180px !important;
     max-width: 180px !important;
   }
-  
+
   .ant-card {
     border-radius: 10px !important;
     margin-bottom: 12px !important;
   }
-  
+
   .ant-card-body {
     padding: 16px !important;
   }
-  
+
   .ant-btn {
     border-radius: 6px !important;
     font-size: 12px !important;
     height: 32px !important;
     padding: 0 12px !important;
   }
-  
+
   .ant-btn-lg {
     height: 36px !important;
     font-size: 14px !important;
   }
-  
+
   .ant-input {
     border-radius: 6px !important;
     font-size: 12px !important;
     padding: 6px 8px !important;
   }
-  
+
   .ant-input-lg {
     font-size: 14px !important;
     padding: 8px 12px !important;
   }
-  
+
   .upload-dragger {
     border-radius: 12px !important;
     padding: 20px 12px !important;
   }
-  
+
   .search-container {
     padding: 12px;
   }
@@ -790,59 +789,59 @@ th,
     border-radius: 8px;
     font-size: 11px;
   }
-  
+
   .ant-layout-content {
     padding: 8px;
     margin: 4px;
   }
-  
+
   .ant-layout-sider {
     width: 160px !important;
     min-width: 160px !important;
     max-width: 160px !important;
   }
-  
+
   .ant-card {
     border-radius: 8px !important;
     margin-bottom: 8px !important;
   }
-  
+
   .ant-card-body {
     padding: 12px !important;
   }
-  
+
   .ant-btn {
     border-radius: 4px !important;
     font-size: 11px !important;
     height: 28px !important;
     padding: 0 8px !important;
   }
-  
+
   .ant-btn-lg {
     height: 32px !important;
     font-size: 12px !important;
   }
-  
+
   .ant-input {
     border-radius: 4px !important;
     font-size: 11px !important;
     padding: 4px 6px !important;
   }
-  
+
   .ant-input-lg {
     font-size: 12px !important;
     padding: 6px 8px !important;
   }
-  
+
   .upload-dragger {
     border-radius: 8px !important;
     padding: 16px 8px !important;
   }
-  
+
   .search-container {
     padding: 8px;
   }
-  
+
   .highlight {
     padding: 2px 4px;
     border-radius: 4px;

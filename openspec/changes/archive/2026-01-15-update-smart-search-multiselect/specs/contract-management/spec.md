@@ -1,4 +1,4 @@
-## 新增需求 (ADDED Requirements)
+## ADDED Requirements
 
 ### Requirement: 智能搜索多分类解析
 智能搜索解析器 **SHALL** 支持从自然语言查询中提取多个客户分类。

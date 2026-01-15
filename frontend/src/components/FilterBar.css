@@ -49,22 +49,9 @@
   border: 2px solid #a78bfa;
   box-shadow: 0 0 8px rgba(167, 139, 250, 0.4);
   background: rgba(167, 139, 250, 0.08);
-  position: relative;
 }
 
-.filter-row-ai::before {
-  content: '✨ AI';
-  position: absolute;
-  top: -8px;
-  left: 12px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  font-size: 10px;
-  font-weight: 600;
-  padding: 2px 8px;
-  border-radius: 4px;
-  letter-spacing: 0.5px;
-}
+
 
 .filter-row-ai:hover {
   border-color: #8b5cf6;

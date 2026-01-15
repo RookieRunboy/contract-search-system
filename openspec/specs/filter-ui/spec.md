@@ -1,7 +1,8 @@
-# Spec: 英特尔风格纵向筛选器 (Filter UI)
+# filter-ui Specification
 
-## MODIFIED Requirements
-
+## Purpose
+TBD - created by archiving change redesign-search-filters. Update Purpose after archive.
+## Requirements
 ### Requirement: Remove Legacy Advanced Filter Panel
 The system SHALL remove the current "Advanced Filter" panel and its toggle button based on `Collapse` component or hidden form.
 - **Scope**: Frontend Only (`SearchPage.tsx`)
